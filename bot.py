@@ -1,3 +1,9 @@
+from pyrogram import Client, filters  
+from pymongo import MongoClient  
+import time  
+import random  
+import string
+
 from pyrogram import Client, filters from pymongo import MongoClient import time import random import string
 
 Load config settings
