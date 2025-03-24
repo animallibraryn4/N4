@@ -1,5 +1,5 @@
 from pyrogram import Client
-from pyrogram.storage import MemoryStorage  # Memory storage import करें
+from pyrogram.storage import MemoryStorage  # Import MemoryStorage
 from config import API_ID, API_HASH, BOT_TOKEN
 
 bot = Client(
@@ -8,7 +8,7 @@ bot = Client(
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
     plugins=dict(root="plugins"),
-    storage=MemoryStorage()  # SQLite के बजाय मेमोरी स्टोरेज का उपयोग करें
+    storage=MemoryStorage("Anime_Library_N4")  # Required argument added
 )
 
 if __name__ == "__main__":
