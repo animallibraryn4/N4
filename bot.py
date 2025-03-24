@@ -12,13 +12,13 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Fix SQLite issue by forcing memory storage (avoiding SQLite file errors)
+# Fix storage issue by letting Pyrogram use in-memory storage
 bot = Client(
     "MyBot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
-    storage="memory",  # Fixes "unable to open database file" error
+    storage=None,  # Fix for "storage" error
     plugins=dict(root="plugins")  # Load command plugins
 )
 
