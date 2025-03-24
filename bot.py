@@ -14,7 +14,7 @@ bot = Client(
     bot_token=BOT_TOKEN,
     plugins=dict(root="plugins")  # Ensure this is correct
     storage=MemoryStorage("my_memory_storage")# Required argument added
-
+)
 print("✅ Plugins loaded successfully!")
 
 if __name__ == "__main__":
