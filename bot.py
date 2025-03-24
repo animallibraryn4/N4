@@ -17,4 +17,6 @@ bot = Client(
 
 print("✅ Plugins loaded successfully!")
 
-bot.run()
+if __name__ == "__main__":
+    print("Bot is running...")
+    bot.run()
