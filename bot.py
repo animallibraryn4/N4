@@ -1,7 +1,4 @@
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
-
-# To this:
-from telegram.ext import Updater, CommandHandler, MessageHandler, CallbackQueryHandler
 from telegram.ext.filters import TEXT, PHOTO, DOCUMENT  # Add specific filters you need
 from config import Config
 import logging
