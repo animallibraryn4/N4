@@ -1,5 +1,6 @@
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
-from telegram.ext.filters import TEXT, PHOTO, DOCUMENT  # Add specific filters you need
+from telegram import Update
+from telegram.ext import ContextTypes
 from config import Config
 import logging
 import importlib
@@ -7,11 +8,17 @@ import os
 from plugins import *
 
 # Set up logging
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                    level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-def load_plugins():
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle errors."""
+    logger.error(f'Update {update} caused error {context.error}')
+
+def load_plugins(application):
     """Dynamically load all plugins from the plugins directory"""
     plugins = []
     for filename in os.listdir("plugins"):
@@ -26,25 +33,35 @@ def load_plugins():
             if hasattr(module, "command_handler"):
                 for handler in module.command_handler:
                     if handler[1]:  # If it's a callback handler
-                        dispatcher.add_handler(CallbackQueryHandler(handler[0], pattern=handler[1]))
+                        application.add_handler(CallbackQueryHandler(handler[0], pattern=handler[1]))
                     else:  # Regular command handler
-                        dispatcher.add_handler(CommandHandler(handler[0], handler[2] if len(handler) > 2 else handler[0]))
+                        if len(handler) > 2:
+                            application.add_handler(CommandHandler(handler[0], handler[2]))
+                        else:
+                            application.add_handler(CommandHandler(handler[0], handler[0]))
     
     logger.info(f"Loaded plugins: {', '.join(plugins)}")
 
-def main():
-    """Start the bot"""
-    updater = Updater(Config.BOT_TOKEN, use_context=True)
-    global dispatcher
-    dispatcher = updater.dispatcher
+async def post_init(application: Application) -> None:
+    """Post initialization tasks."""
+    await application.bot.set_my_commands([
+        ("start", "Start the bot"),
+        ("help", "Get help")
+    ])
+
+def main() -> None:
+    """Start the bot."""
+    # Create the Application
+    application = Application.builder().token(Config.BOT_TOKEN).post_init(post_init).build()
     
     # Load all plugins
-    load_plugins()
+    load_plugins(application)
     
-    # Start the Bot
-    updater.start_polling()
-    logger.info("Bot started and running...")
-    updater.idle()
+    # Add error handler
+    application.add_error_handler(error_handler)
+    
+    # Run the bot until Ctrl-C is pressed
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
     main()
