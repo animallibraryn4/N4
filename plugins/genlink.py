@@ -1,5 +1,5 @@
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import CommandHandler, CallbackQueryHandler
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
 from config import Config
 import random
 import string
@@ -10,13 +10,12 @@ def generate_random_string(length=8):
     """Generate a random string for the link"""
     return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
 
-def genlink(update, context):
+async def genlink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /genlink command"""
     message = update.message
     
-    # Check if the message is a reply to a link
-    if not message.reply_to_message or not message.reply_to_message.text:
-        message.reply_text("Please reply to a message containing a link with /genlink")
+    if not message or not message.reply_to_message or not message.reply_to_message.text:
+        await message.reply_text("Please reply to a message containing a link with /genlink")
         return
     
     # Extract the original link
@@ -39,23 +38,24 @@ def genlink(update, context):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     # Send the message
-    message.reply_text(
+    await message.reply_text(
         f"{Config.WELCOME_MESSAGE}\n\n{generated_link}",
         reply_markup=reply_markup
     )
 
-def handle_start_with_link(update, context):
+async def handle_start_with_link(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle when someone clicks the generated link"""
-    query = update.callback_query if hasattr(update, 'callback_query') else None
+    query = update.callback_query
     user_id = query.from_user.id if query else update.message.from_user.id
     
     # Check force subscription
     if not check_force_sub(user_id):
         channels_to_join = "\n".join([f"- {ch['channel_link']}" for ch in Config.FORCE_SUB_CHANNELS])
-        update.message.reply_text(
-            f"Please join these channels first:\n{channels_to_join}",
-            disable_web_page_preview=True
-        )
+        if update.message:
+            await update.message.reply_text(
+                f"Please join these channels first:\n{channels_to_join}",
+                disable_web_page_preview=True
+            )
         return
     
     # Get the link ID from the start parameter
@@ -68,12 +68,12 @@ def handle_start_with_link(update, context):
             reply_markup = InlineKeyboardMarkup(keyboard)
             
             if query:
-                query.edit_message_text(
+                await query.edit_message_text(
                     f"{Config.WELCOME_MESSAGE}",
                     reply_markup=reply_markup
                 )
-            else:
-                update.message.reply_text(
+            elif update.message:
+                await update.message.reply_text(
                     f"{Config.WELCOME_MESSAGE}",
                     reply_markup=reply_markup
                 )
@@ -81,9 +81,9 @@ def handle_start_with_link(update, context):
     
     # If no valid link found
     if query:
-        query.answer("Invalid or expired link!", show_alert=True)
-    else:
-        update.message.reply_text("Invalid or expired link!")
+        await query.answer("Invalid or expired link!", show_alert=True)
+    elif update.message:
+        await update.message.reply_text("Invalid or expired link!")
 
 # Command handlers to register
 command_handler = [
