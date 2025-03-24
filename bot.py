@@ -12,13 +12,14 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Fix storage issue by letting Pyrogram use in-memory storage
+# Set an explicit path for session storage
+SESSION_FILE = os.path.abspath("MyBot.session")
+
 bot = Client(
-    "MyBot",
+    SESSION_FILE,  # Using an absolute path to prevent SQLite errors
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN,
-    storage=None,  # Fix for "storage" error
     plugins=dict(root="plugins")  # Load command plugins
 )
 
