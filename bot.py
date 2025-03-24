@@ -13,7 +13,7 @@ logging.basicConfig(
 )
 
 # Set an explicit path for session storage
-SESSION_FILE = os.path.abspath("MyBot.session")
+SESSION_FILE = os.path.join(os.getcwd(), "MyBot.session")
 
 bot = Client(
     SESSION_FILE,  # Using an absolute path to prevent SQLite errors
