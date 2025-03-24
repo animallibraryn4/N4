@@ -1,5 +1,4 @@
-# Change this line:
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
 # To this:
 from telegram.ext import Updater, CommandHandler, MessageHandler, CallbackQueryHandler
