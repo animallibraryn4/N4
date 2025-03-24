@@ -6,20 +6,20 @@ import os
 
 class Config:
     # Bot Token from @BotFather (PTB)
-    BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+    BOT_TOKEN = os.getenv("BOT_TOKEN", "7632805578:AAHyFiomSTFhIxt56vHnosOREPg2iMU8_TQ")
     
     # Bot Username
-    BOT_USERNAME = os.getenv("BOT_USERNAME", "")
+    BOT_USERNAME = os.getenv("BOT_USERNAME", "N4_Links_bot")
     
     # Telegram API ID and Hash (for Telethon)
-    API_ID = int(os.getenv("API_ID", 12345))
-    API_HASH = os.getenv("API_HASH", "0123456789abcdef0123456789abcdef")
+    API_ID = int(os.getenv("API_ID", 22299340))
+    API_HASH = os.getenv("API_HASH", "09b09f3e2ff1306da4a19888f614d937")
     
     # Admin IDs
-    ADMINS = [int(admin) if admin.isdigit() else admin for admin in os.getenv('ADMINS', '').split(',')]
+    ADMINS = [int(admin) if admin.isdigit() else admin for admin in os.getenv('ADMINS', '5380609667').split(',')]
     
     # Database URI
-    DB_URI = os.getenv("DB_URI", "")
+    DB_URI = os.getenv("DB_URI", "mongodb+srv://gerbil77001:lkFEusnWzXwe53NU@cluster0.mkeei.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
     
     # Other configurations...
 def manage_channels(update, context):
