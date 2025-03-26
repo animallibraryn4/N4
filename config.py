@@ -1,5 +1,5 @@
 # Website URL (Anime-World)
-ANIME_WORLD_URL = "https://anime-world.co/anime-list/"
+ANIME_WORLD_URL = "https://anime-world.co/category/anime/"
 
 # User-Agent (Prevents Blocking by Website)
 HEADERS = {
