@@ -3,7 +3,9 @@ from bs4 import BeautifulSoup
 import os
 
 # User-Agent ताकि वेबसाइट हमें ब्लॉक न करे
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Mobile Safari/537.36"
+}
 
 # एनीमे लिस्ट निकालने के लिए फंक्शन
 def get_anime_list():
