@@ -1,16 +1,10 @@
 import requests
 from bs4 import BeautifulSoup
-import os
+from config import ANIME_WORLD_URL, HEADERS
 
-# User-Agent ताकि वेबसाइट हमें ब्लॉक न करे
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Mobile Safari/537.36"
-}
-
-# एनीमे लिस्ट निकालने के लिए फंक्शन
+# Function to Get Anime List
 def get_anime_list():
-    URL = "https://anime-world.co/"
-    response = requests.get(URL, headers=HEADERS)
+    response = requests.get(ANIME_WORLD_URL, headers=HEADERS)
     soup = BeautifulSoup(response.text, "html.parser")
     
     anime_list = []
@@ -21,7 +15,7 @@ def get_anime_list():
     
     return anime_list
 
-# किसी एक एनीमे के एपिसोड लिंक्स निकालने के लिए फंक्शन
+# Function to Get Episode Links for an Anime
 def get_episode_links(anime_page_url):
     response = requests.get(anime_page_url, headers=HEADERS)
     soup = BeautifulSoup(response.text, "html.parser")
@@ -34,7 +28,7 @@ def get_episode_links(anime_page_url):
     
     return episodes
 
-# वीडियो डाउनलोड करने के लिए फंक्शन
+# Function to Download Video
 def download_video(video_url, save_path="downloaded_video.mp4"):
     response = requests.get(video_url, stream=True)
     
@@ -42,18 +36,18 @@ def download_video(video_url, save_path="downloaded_video.mp4"):
         for chunk in response.iter_content(chunk_size=1024):
             file.write(chunk)
 
-    return save_path  # डाउनलोड की गई फाइल का नाम वापस करेगा
+    return save_path  # Returns the Downloaded File Name
 
-# टेस्ट के लिए
+# Test the Scraper
 if __name__ == "__main__":
     anime_list = get_anime_list()
-    print("Anime List:", anime_list[:5])  # पहले 5 एनीमे प्रिंट करेंगे
+    print("Anime List:", anime_list[:5])  # Prints the First 5 Animes
     
     if anime_list:
         episodes = get_episode_links(anime_list[0]["link"])
-        print("Episodes of first anime:", episodes[:5])  # पहले 5 एपिसोड प्रिंट करेंगे
+        print("Episodes of First Anime:", episodes[:5])  # Prints First 5 Episodes
         
         if episodes:
-            print("Downloading first episode...")
+            print("Downloading First Episode...")
             video_file = download_video(episodes[0]["link"])
             print("Downloaded:", video_file)
