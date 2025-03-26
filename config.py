@@ -5,7 +5,7 @@ load_dotenv()
 
 class Config:
     # Telegram Bot Token
-    TOKEN = os.getenv("TOKEN")
+    TOKEN = os.getenv("TOKEN", "7632805578:AAHyFiomSTFhIxt56vHnosOREPg2iMU8_TQ")
     
     # Anime World Website
     BASE_URL = "https://anime-world.co"
