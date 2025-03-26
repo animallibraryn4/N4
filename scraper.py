@@ -7,7 +7,7 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # एनीमे लिस्ट निकालने के लिए फंक्शन
 def get_anime_list():
-    URL = "https://anime-world.co/anime-list/"
+    URL = "https://anime-world.co/"
     response = requests.get(URL, headers=HEADERS)
     soup = BeautifulSoup(response.text, "html.parser")
     
