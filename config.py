@@ -1,10 +1,9 @@
-import os
-from dotenv import load_dotenv
+# Website URL (Anime-World)
+ANIME_WORLD_URL = "https://anime-world.co/anime-list/"
 
-load_dotenv()
+# User-Agent (वेबसाइट ब्लॉक न करे इसलिए)
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-API_ID = int(os.getenv("API_ID", "22299340"))
-API_HASH = os.getenv("API_HASH", "09b09f3e2ff1306da4a19888f614d937")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "7632805578:AAHyFiomSTFhIxt56vHnosOREPg2iMU8_TQ")
-MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://gerbil77001:lkFEusnWzXwe53NU@cluster0.mkeei.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "5380609667"))  # Admin user ID
+# Telegram Bot Configuration
+TELEGRAM_BOT_TOKEN = "AAHyFiomSTFhIxt56vHnosOREPg2iMU8_TQ"
+TELEGRAM_CHANNEL_ID = "-1001896877147"
