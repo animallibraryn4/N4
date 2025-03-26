@@ -1,5 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
+import os
 
 # User-Agent ताकि वेबसाइट हमें ब्लॉक न करे
 HEADERS = {"User-Agent": "Mozilla/5.0"}
@@ -31,6 +32,16 @@ def get_episode_links(anime_page_url):
     
     return episodes
 
+# वीडियो डाउनलोड करने के लिए फंक्शन
+def download_video(video_url, save_path="downloaded_video.mp4"):
+    response = requests.get(video_url, stream=True)
+    
+    with open(save_path, "wb") as file:
+        for chunk in response.iter_content(chunk_size=1024):
+            file.write(chunk)
+
+    return save_path  # डाउनलोड की गई फाइल का नाम वापस करेगा
+
 # टेस्ट के लिए
 if __name__ == "__main__":
     anime_list = get_anime_list()
@@ -39,3 +50,8 @@ if __name__ == "__main__":
     if anime_list:
         episodes = get_episode_links(anime_list[0]["link"])
         print("Episodes of first anime:", episodes[:5])  # पहले 5 एपिसोड प्रिंट करेंगे
+        
+        if episodes:
+            print("Downloading first episode...")
+            video_file = download_video(episodes[0]["link"])
+            print("Downloaded:", video_file)
