@@ -79,22 +79,31 @@ async def start_uploader(client: Client, message: Message, url: str, proc: Messa
 
     await proc.edit_text(f"Processing : `{url}`")
 
-    file = await download(url, proc)
-    filename = get_file_name(url)
-    os.rename(file, "./files/" + filename)
+    try:
+        file = await download(url, proc)
+        filename = get_file_name(url)
+        os.rename(file, "./files/" + filename)
 
-    caption = f"🧿 **File :** `{filename}`"
+        caption = f"🧿 **File :** `{filename}`"
 
-    t3 = time.time()
-    await client.send_document(
-        chat_id="Hindi_Sub_Dub_Anime_Download",
-        document="./files/" + filename,
-        thumb="thumb.jpeg",
-        caption=caption,
-        file_name=filename,
-        force_document=True,
-        progress=uploadProgress,
-        progress_args=(proc,),
-    )
-
-    os.remove("./files/" + filename)
+        t3 = time.time()
+        
+        # Check if thumbnail exists, otherwise don't send it
+        thumb = "thumb.jpeg" if os.path.exists("thumb.jpeg") else None
+        
+        await client.send_document(
+            chat_id="Hindi_Sub_Dub_Anime_Download",
+            document="./files/" + filename,
+            thumb=thumb,  # This will be None if file doesn't exist
+            caption=caption,
+            file_name=filename,
+            force_document=True,
+            progress=uploadProgress,
+            progress_args=(proc,),
+        )
+    except Exception as e:
+        await message.reply_text(f"Upload failed: {str(e)}")
+    finally:
+        # Clean up the file whether upload succeeded or failed
+        if os.path.exists("./files/" + filename):
+            os.remove("./files/" + filename)
