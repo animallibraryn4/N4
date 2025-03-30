@@ -49,7 +49,7 @@ def get_file_name(url):
     x = url.split("/")[-1]
     x = urllib.parse.unquote(x)
     ext = x.split(".")[-1]
-    x = x.split("-AAT[")[0].strip().replace(".", " ").replace("-", " ") + " [@Hindi_Sub_Dub_Anime_Download]." + ext
+    x = x.split("-AAT[")[0].strip().replace(".", " ").replace("-", " ") + " [@animestorys_1]." + ext
     return x
 
 
