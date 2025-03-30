@@ -23,55 +23,57 @@ async def start(client, message: Message):
 
 
 @app.on_message(filters.command("get") & filters.private & filters.user(5336360484))
+@app.on_message(filters.command("get") & filters.private & filters.user(5336360484))
 async def newUpload(client: Client, message: Message):
     try:
         proc = await message.reply_text("Getting Archive Urls...")
-
+        
+        if len(message.text.split()) < 3:
+            return await proc.edit_text("Usage: /get <url> <quality>")
+            
         url = message.text.split(" ", 2)[1]
         quality = message.text.split(" ", 2)[2].upper()
 
-        if "animeacademy.in" in url:
-            data = get_anime_urls(url)
+        if "animeacademy.in" not in url:
+            return await proc.edit_text("Only animeacademy.in URLs are supported")
 
-            for i in data["links"]:
-                if i[0] != quality:
-                    continue
+        data = get_anime_urls(url)
+        if not data or not data.get("links"):
+            return await proc.edit_text("No download links found")
 
-                for j in i[1]:
+        for quality_data in data["links"]:
+            if quality_data[0] == quality:
+                for archive_url in quality_data[1]:
+                    await proc.edit_text(f"Processing {quality} quality links...")
                     await asyncio.sleep(5)
-                    await proc.edit_text("Getting Index Urls...")
-
-                    data = get_index_urls(j)
-                    await asyncio.sleep(5)
-
-                    await proc.edit_text("Getting File Urls...")
-
-                    files = []
-
-                    for i in data:
-                        await asyncio.sleep(5)
-                        try:
-                            data = IndexScrapper(i)
-
-                            text = "Files : \n\n"
-
-                            for i in data:
-                                files.append(i[1])
-                            break
-                        except Exception as e:
+                    
+                    try:
+                        index_urls = get_index_urls(archive_url)
+                        if not index_urls:
                             continue
-
-                    await asyncio.sleep(5)
-                    await proc.edit_text("Starting Upload...")
-                    await newUpload(files, client, message, proc)
-
-                await proc.delete()
-                await message.reply_text("Upload Completed!")
-        else:
-            await proc.edit_text("Invalid URL")
-
+                            
+                        files = []
+                        for index_url in index_urls:
+                            try:
+                                file_data = IndexScrapper(index_url)
+                                files.extend([i[1] for i in file_data])
+                                break  # Only process first successful index
+                            except Exception as e:
+                                continue
+                                
+                        if files:
+                            await proc.edit_text(f"Found {len(files)} files, starting upload...")
+                            await upload_files(files, client, message, proc)
+                            
+                    except Exception as e:
+                        await message.reply_text(f"Error processing {archive_url}: {str(e)}")
+                        continue
+                        
+        await proc.delete()
+        await message.reply_text("Process completed!")
+        
     except Exception as e:
-        await message.reply_text(str(e))
+        await message.reply_text(f"Error: {str(e)}")
 
 
 async def newUpload(urls, client: Client, message: Message, proc: Message):
