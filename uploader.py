@@ -92,7 +92,7 @@ async def start_uploader(client: Client, message: Message, url: str, proc: Messa
         thumb = "thumb.jpeg" if os.path.exists("thumb.jpeg") else None
         
         await client.send_document(
-            chat_id="Hindi_Sub_Dub_Anime_Download",
+            chat_id="animestorys_1",
             document="./files/" + filename,
             thumb=thumb,  # This will be None if file doesn't exist
             caption=caption,
