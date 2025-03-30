@@ -1,3 +1,4 @@
+import asyncio
 from pyrogram import filters, idle, Client
 from pyrogram.types import Message
 
@@ -14,12 +15,12 @@ app = Client(
 )
 
 
-@app.on_message(filters.command("start") & filters.private & filters.user(5336360484))
+@app.on_message(filters.command("start") & filters.private & filters.user(5380609667))
 async def start(client, message: Message):
     await message.reply_text("Working...")
 
 
-@app.on_message(filters.command("get") & filters.private & filters.user(5336360484))
+@app.on_message(filters.command("get") & filters.private & filters.user(5380609667))
 async def newUpload(client: Client, message: Message):
     try:
         proc = await message.reply_text("Getting Archive Urls...")
@@ -83,7 +84,7 @@ async def newUpload(urls, client: Client, message: Message, proc: Message):
         await message.reply_text(str(e))
 
 
-@app.on_message(filters.command("post") & filters.private & filters.user(5336360484))
+@app.on_message(filters.command("post") & filters.private & filters.user(5380609667))
 async def postAnime(client: Client, message: Message):
     try:
         id = message.text.split(" ", 1)[1]
@@ -107,5 +108,8 @@ async def main():
 import asyncio
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    try:
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(main())
+    except Exception as e:
+        print(f"Fatal error: {e}")
