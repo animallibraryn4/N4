@@ -53,8 +53,14 @@ def getAnimeInfo(query):
 (Source: AniList)
 """
 
-        return img, text1, text2  # Now returns 3 values
+        def getAnimeInfo(query):
+    try:
+        # ... (same data fetching as before) ...
+
+        # Combine both formats into one message
+        combined_text = f"{text1}\n\n━━━━━━━━━━━━━━━━━━━━\n📜 **DETAILED INFO**\n━━━━━━━━━━━━━━━━━━━━\n{text2}"
+
+        return img, combined_text  # Only 2 values returned
 
     except Exception as e:
-        error_msg = f"⚠️ Error fetching anime info: {str(e)}"
-        return None, error_msg, error_msg
+        return None, f"⚠️ Error: {str(e)}"  # Still returns 2 values
