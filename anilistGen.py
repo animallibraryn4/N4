@@ -1,34 +1,36 @@
 from AnilistPython import Anilist
-from datetime import datetime
 
 anilist = Anilist()
 
 def getAnimeInfo(query):
-    id = anilist.get_anime_id(query)
-    anime = anilist.get_anime_with_id(id)
+    try:
+        id = anilist.get_anime_id(query)
+        anime = anilist.get_anime_with_id(id)
 
-    img = f"https://img.anili.st/media/{id}"
+        img = f"https://img.anili.st/media/{id}"
 
-    # Common data
-    name_romaji = anime["name_romaji"]
-    name_english = anime["name_english"]
-    _type = anime["airing_format"]
-    status = anime["airing_status"]
-    episodes = anime["airing_episodes"]
-    score = anime["average_score"]
-    genres = ", ".join(anime["genres"])
-    desc = anime["desc"]
-    start_date = anime["starting_time"]
-    end_date = anime["ending_time"]
-    duration = anime["duration"]  # in minutes
+        # Common data with safe defaults
+        name_romaji = anime.get("name_romaji", "N/A")
+        name_english = anime.get("name_english", name_romaji)
+        _type = anime.get("airing_format", "N/A")
+        status = anime.get("airing_status", "N/A")
+        episodes = anime.get("airing_episodes", "N/A")
+        score = anime.get("average_score", "N/A")
+        genres = ", ".join(anime.get("genres", [])) or "N/A"
+        desc = anime.get("desc", "No synopsis available.")
+        
+        # Handle potentially missing dates and duration
+        start_date = anime.get("starting_time", "N/A")
+        end_date = anime.get("ending_time", "N/A")
+        duration = f"{anime.get('duration', 'N/A')} minutes" if anime.get('duration') else "N/A"
 
-    # Format 1 (Original Compact Format)
-    if name_english != name_romaji:
-        text1 = f"**{name_english} - ({name_romaji})**"
-    else:
-        text1 = f"**{name_english}**"
+        # Format 1 (Original Compact Format)
+        if name_english != name_romaji:
+            text1 = f"**{name_english} - ({name_romaji})**"
+        else:
+            text1 = f"**{name_english}**"
 
-    text1 += f"""
+        text1 += f"""
 ━━━━━━━━━━━━━━━━━━━━
 📺 **Type :** `{_type}`
 🕒 **Status :** `{status}`
@@ -40,22 +42,26 @@ def getAnimeInfo(query):
 ━━━━━━━━━━━━━━━━━━━━
 """
 
-    # Format 2 (Detailed Format)
-    text2 = f"""
+        # Format 2 (Detailed Format)
+        text2 = f"""
 **{name_english} | {name_romaji}**
 
-‣ **Genres :** {genres}
-‣ **Type :** {_type}
-‣ **Average Rating :** {score}
-‣ **Status :** {status}
-‣ **First aired :** {start_date}
-‣ **Last aired :** {end_date}
-‣ **Runtime :** {duration} minutes
-‣ **No of episodes :** {episodes}
+‣ **Genres:** {genres}
+‣ **Type:** {_type}
+‣ **Average Rating:** {score}
+‣ **Status:** {status}
+‣ **First aired:** {start_date}
+‣ **Last aired:** {end_date}
+‣ **Runtime:** {duration}
+‣ **No of episodes:** {episodes}
 
-‣ **Synopsis :** {desc}
+‣ **Synopsis:** {desc}
 
 (Source: AniList)
 """
 
-    return img, text1, text2
+        return img, text1, text2
+
+    except Exception as e:
+        error_msg = f"Error fetching anime info: {str(e)}"
+        return None, error_msg, error_msg
