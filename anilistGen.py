@@ -2,59 +2,52 @@ from AnilistPython import Anilist
 
 anilist = Anilist()
 
+
 def getAnimeInfo(query):
-    try:  # <- Properly indented inside the function
-        id = anilist.get_anime_id(query)
-        anime = anilist.get_anime_with_id(id)
+    id = anilist.get_anime_id(query)
+    anime = anilist.get_anime_with_id(id)
 
-        img = f"https://img.anili.st/media/{id}"
+    img = f"https://img.anili.st/media/{id}"
 
-        # Extract data safely
-        name_romaji = anime.get("name_romaji", "N/A")
-        name_english = anime.get("name_english", name_romaji)
-        _type = anime.get("airing_format", "N/A")
-        status = anime.get("airing_status", "N/A")
-        episodes = anime.get("airing_episodes", "N/A")
-        score = anime.get("average_score", "N/A")
-        genres = ", ".join(anime.get("genres", [])) or "N/A"
-        desc = anime.get("desc", "No synopsis available.")
-        start_date = anime.get("starting_time", "N/A")
-        end_date = anime.get("ending_time", "N/A")
-        duration = f"{anime.get('duration', 'N/A')} min" if anime.get('duration') else "N/A"
+    name_romaji = anime["name_romaji"]
+    name_english = anime["name_english"]
+    
+    # Formatting the name
+    if name_english != name_romaji:
+        title = f"{name_english} | {name_romaji}"
+    else:
+        title = name_english
 
-        # Format 1 (Compact)
-        text1 = f"**{name_english}** ({name_romaji})" if name_english != name_romaji else f"**{name_english}**"
-        text1 += f"""
-━━━━━━━━━━━━━━━━━━━━
-📺 **Type:** `{_type}`
-🕒 **Status:** `{status}`
-🎬 **Episodes:** `{episodes}`
-⭐ **Score:** `{score}`
-🔮 **Genres:** `{genres}`
-━━━━━━━━━━━━━━━━━━━━
-📥 **Watch/Download:** SD | HD | FHD
-━━━━━━━━━━━━━━━━━━━━"""
+    # Getting all details
+    genres = ", ".join(anime["genres"])
+    _type = anime["airing_format"]
+    score = anime["average_score"]
+    status = anime["airing_status"]
+    start_date = anime["starting_time"]
+    end_date = anime["ending_time"]
+    episodes = anime["airing_episodes"]
+    duration = "24 minutes"  # Assuming standard anime episode length
+    desc = anime["desc"]
 
-        # Format 2 (Detailed)
-        text2 = f"""
-**{name_english} | {name_romaji}**
+    # First message - Basic info
+    info_msg = f"""
+{title}
 
-‣ **Genres:** {genres}
-‣ **Type:** {_type}
-‣ **Rating:** {score}
-‣ **Status:** {status}
-‣ **Aired:** {start_date} to {end_date}
-‣ **Runtime:** {duration}
-‣ **Episodes:** {episodes}
-
-📜 **Synopsis:**  
-{desc}
-
-(Source: AniList)
+‣ Genres : {genres}
+‣ Type : {_type}
+‣ Average Rating : {score}
+‣ Status : {status}
+‣ First aired : {start_date}
+‣ Last aired : {end_date}
+‣ Runtime : {duration}
+‣ No of episodes : {episodes}
 """
 
-        return img, text1, text2  # Returns 3 values
+    # Second message - Synopsis
+    synopsis_msg = f"""
+‣ Synopsis : {desc}
 
-    except Exception as e:  # <- Properly indented
-        error_msg = f"⚠️ Error fetching anime info: {str(e)}"
-        return None, error_msg, error_msg  # Returns 3 values (error case)
+(Source: Crunchyroll)
+"""
+
+    return img, info_msg, synopsis_msg
