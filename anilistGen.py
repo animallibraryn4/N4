@@ -3,7 +3,7 @@ from AnilistPython import Anilist
 anilist = Anilist()
 
 def getAnimeInfo(query):
-    try:
+    try:  # <- Properly indented inside the function
         id = anilist.get_anime_id(query)
         anime = anilist.get_anime_with_id(id)
 
@@ -53,14 +53,8 @@ def getAnimeInfo(query):
 (Source: AniList)
 """
 
-        def getAnimeInfo(query):
-    try:
-        # ... (same data fetching as before) ...
+        return img, text1, text2  # Returns 3 values
 
-        # Combine both formats into one message
-        combined_text = f"{text1}\n\n━━━━━━━━━━━━━━━━━━━━\n📜 **DETAILED INFO**\n━━━━━━━━━━━━━━━━━━━━\n{text2}"
-
-        return img, combined_text  # Only 2 values returned
-
-    except Exception as e:
-        return None, f"⚠️ Error: {str(e)}"  # Still returns 2 values
+    except Exception as e:  # <- Properly indented
+        error_msg = f"⚠️ Error fetching anime info: {str(e)}"
+        return None, error_msg, error_msg  # Returns 3 values (error case)
