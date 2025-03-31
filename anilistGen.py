@@ -9,7 +9,7 @@ def getAnimeInfo(query):
 
         img = f"https://img.anili.st/media/{id}"
 
-        # Common data with safe defaults
+        # Extract data safely
         name_romaji = anime.get("name_romaji", "N/A")
         name_english = anime.get("name_english", name_romaji)
         _type = anime.get("airing_format", "N/A")
@@ -18,50 +18,43 @@ def getAnimeInfo(query):
         score = anime.get("average_score", "N/A")
         genres = ", ".join(anime.get("genres", [])) or "N/A"
         desc = anime.get("desc", "No synopsis available.")
-        
-        # Handle potentially missing dates and duration
         start_date = anime.get("starting_time", "N/A")
         end_date = anime.get("ending_time", "N/A")
-        duration = f"{anime.get('duration', 'N/A')} minutes" if anime.get('duration') else "N/A"
+        duration = f"{anime.get('duration', 'N/A')} min" if anime.get('duration') else "N/A"
 
-        # Format 1 (Original Compact Format)
-        if name_english != name_romaji:
-            text1 = f"**{name_english} - ({name_romaji})**"
-        else:
-            text1 = f"**{name_english}**"
-
+        # Format 1 (Compact)
+        text1 = f"**{name_english}** ({name_romaji})" if name_english != name_romaji else f"**{name_english}**"
         text1 += f"""
 ━━━━━━━━━━━━━━━━━━━━
-📺 **Type :** `{_type}`
-🕒 **Status :** `{status}`
-🎬 **Episodes :** `{episodes}`
-⭐ **Score :** `{score}`
-🔮 **Genres :** `{genres}`
+📺 **Type:** `{_type}`
+🕒 **Status:** `{status}`
+🎬 **Episodes:** `{episodes}`
+⭐ **Score:** `{score}`
+🔮 **Genres:** `{genres}`
 ━━━━━━━━━━━━━━━━━━━━
-📥 **Watch / Download : SD ┃ HD ┃ FHD**
-━━━━━━━━━━━━━━━━━━━━
-"""
+📥 **Watch/Download:** SD | HD | FHD
+━━━━━━━━━━━━━━━━━━━━"""
 
-        # Format 2 (Detailed Format)
+        # Format 2 (Detailed)
         text2 = f"""
 **{name_english} | {name_romaji}**
 
 ‣ **Genres:** {genres}
 ‣ **Type:** {_type}
-‣ **Average Rating:** {score}
+‣ **Rating:** {score}
 ‣ **Status:** {status}
-‣ **First aired:** {start_date}
-‣ **Last aired:** {end_date}
+‣ **Aired:** {start_date} to {end_date}
 ‣ **Runtime:** {duration}
-‣ **No of episodes:** {episodes}
+‣ **Episodes:** {episodes}
 
-‣ **Synopsis:** {desc}
+📜 **Synopsis:**  
+{desc}
 
 (Source: AniList)
 """
 
-        return img, text1, text2
+        return img, text1, text2  # Now returns 3 values
 
     except Exception as e:
-        error_msg = f"Error fetching anime info: {str(e)}"
+        error_msg = f"⚠️ Error fetching anime info: {str(e)}"
         return None, error_msg, error_msg
