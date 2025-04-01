@@ -14,12 +14,12 @@ app = Client(
 )
 
 
-@app.on_message(filters.command("start") & filters.private & filters.user(5336360484))
+@app.on_message(filters.command("start") & filters.private & filters.user(5380609667))
 async def start(client, message: Message):
     await message.reply_text("Working...")
 
 
-@app.on_message(filters.command("get") & filters.private & filters.user(5336360484))
+@app.on_message(filters.command("get") & filters.private & filters.user(5380609667))
 async def newUpload(client: Client, message: Message):
     try:
         proc = await message.reply_text("Getting Archive Urls...")
@@ -83,7 +83,7 @@ async def newUpload(urls, client: Client, message: Message, proc: Message):
         await message.reply_text(str(e))
 
 
-@app.on_message(filters.command("post") & filters.private & filters.user(5336360484))
+@app.on_message(filters.command("post") & filters.private & filters.user(5380609667))
 async def postAnime(client: Client, message: Message):
     try:
         id = message.text.split(" ", 1)[1]
