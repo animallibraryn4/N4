@@ -6,8 +6,8 @@ from telegram import Update, InputMediaVideo
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
 # Load configuration
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "7632805578:AAHyFiomSTFhIxt56vHnosOREPg2iMU8_TQ")
+CHANNEL_ID = os.getenv("CHANNEL_ID", "-1001896877147")
 QUALITY = os.getenv("DEFAULT_QUALITY", "720p")
 
 # Load anime sources
