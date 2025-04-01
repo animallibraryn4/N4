@@ -49,7 +49,7 @@ def get_file_name(url):
     x = url.split("/")[-1]
     x = urllib.parse.unquote(x)
     ext = x.split(".")[-1]
-    x = x.split("-AAT[")[0].strip().replace(".", " ").replace("-", " ") + " [@Hindi_Sub_Dub_Anime_Download]." + ext
+    x = x.split("-AAT[")[0].strip().replace(".", " ").replace("-", " ") + " [@animestorys_1]." + ext
     return x
 
 
@@ -87,7 +87,7 @@ async def start_uploader(client: Client, message: Message, url: str, proc: Messa
 
     t3 = time.time()
     await client.send_document(
-        chat_id="Hindi_Sub_Dub_Anime_Download",
+        chat_id="animestorys_1",
         document="./files/" + filename,
         thumb="thumb.jpeg",
         caption=caption,
