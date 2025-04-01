@@ -11,7 +11,7 @@ app = Client(
     "bot",
     api_id=22299340,
     api_hash="09b09f3e2ff1306da4a19888f614d937",
-    bot_token="",
+    bot_token="7632805578:AAHyFiomSTFhIxt56vHnosOREPg2iMU8_TQ",
 )
 
 # Helper functions
@@ -74,11 +74,11 @@ async def download_file(url, message):
     return local_filename
 
 # Bot commands
-@app.on_message(filters.command("start") & filters.private & filters.user(5336360484))
+@app.on_message(filters.command("start") & filters.private & filters.user(5380609667))
 async def start(client, message: Message):
     await message.reply_text("Bot is working! Use /get [url] [quality] to download anime")
 
-@app.on_message(filters.command("get") & filters.private & filters.user(5336360484))
+@app.on_message(filters.command("get") & filters.private & filters.user(5380609667))
 async def handle_download(client: Client, message: Message):
     try:
         parts = message.text.split(maxsplit=2)
