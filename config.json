@@ -1,0 +1,16 @@
+{
+    "solo-leveling": {
+        "480p": {
+            "S01E01": "https://example.com/solo-leveling/S01E01-480p.mp4",
+            "S01E02": "https://example.com/solo-leveling/S01E02-480p.mp4"
+        },
+        "720p": {
+            "S01E01": "https://example.com/solo-leveling/S01E01-720p.mp4",
+            "S01E02": "https://example.com/solo-leveling/S01E02-720p.mp4"
+        },
+        "1080p": {
+            "S01E01": "https://example.com/solo-leveling/S01E01-1080p.mp4",
+            "S01E02": "https://example.com/solo-leveling/S01E02-1080p.mp4"
+        }
+    }
+}
