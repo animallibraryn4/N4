@@ -13,6 +13,36 @@ from bot import Bot
 from config import ADMINS, CHANNEL_ID, FORCE_MSG, FORCE_SUB_CHANNEL, FORCE_SUB_CHANNEL2, OWNER_TAG, START_MSG, CUSTOM_CAPTION, DISABLE_CHANNEL_BUTTON, PROTECT_CONTENT, OWNER_ID, SHORTLINK_API_URL, SHORTLINK_API_KEY, USE_PAYMENT, USE_SHORTLINK, VERIFY_EXPIRE, TIME, TUT_VID, U_S_E_P
 from helper_func import encode, get_readable_time, increasepremtime, subscribed, subscribed2, decode, get_messages, get_shortlink, get_verify_status, update_verify_status, get_exp_time
 from database.database import add_admin, add_user, del_admin, del_user, full_adminbase, full_userbase, gen_new_count, get_clicks, inc_count, new_link, present_admin, present_hash, present_user
+# Add this near the top with other imports
+from database.database import link_data
+
+# Then in the start_command function, add this condition:
+if len(message.text) > 7:
+    try:
+        base64_string = message.text.split(" ", 1)[1]
+        _string = await decode(base64_string)
+        
+        # Handle link forwarding
+        if _string.startswith("link-"):
+            hash = _string.split("-")[1]
+            link_info = await link_data.find_one({'hash': hash})
+            if link_info:
+                # Increment click count
+                await link_data.update_one(
+                    {'hash': hash},
+                    {'$inc': {'clicks': 1}}
+                )
+                
+                # Send the link with button
+                await message.reply_text(
+                    "Here is your link! Click below to proceed:",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Open Link", url=link_info['original_url'])]
+                    ])
+                )
+                return
+    except:
+        pass
 
 SECONDS = TIME 
 TUT_VID = f"{TUT_VID}"
