@@ -27,6 +27,30 @@ async def start_command(client: Client, message: Message):
         except:
             pass
     verify_status = await get_verify_status(id)
+    # Forwarded link handling (base64 link)
+if len(message.text) > 7:
+    try:
+        base64_string = message.text.split(" ", 1)[1]
+        _string = await decode(base64_string)
+
+        # Check if it's a forwarded link
+        if _string.startswith("link-"):
+            hash = _string.split("-")[1]
+            link_info = await link_data.find_one({'hash': hash})
+            if link_info:
+                # Increment click count
+                await link_data.update_one({'hash': hash}, {'$inc': {'clicks': 1}})
+
+                # Send link with button
+                await message.reply_text(
+                    "Here is your link! Click below to proceed:",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Open Link", url=link_info['original_url'])]
+                    ])
+                )
+                return
+    except:
+        pass
     if USE_SHORTLINK and (not U_S_E_P):
         for i in range(1):
             if id in ADMINS:
