@@ -110,7 +110,7 @@ async def start_command(client: Client, message: Message):
                         pass
                 if (SECONDS == 0):
                     return
-                notification_msg = await message.reply(f"<b>🌺 <u>Notice</u> 🌺</b>\n\n<b><blockquote>This file will be  deleted in {get_exp_time(SECONDS)}. Please save or forward it to your saved messages before it gets deleted.</blockquote></b>")
+                notification_msg = await message.reply(f"<b>🌺 <u>Notice</u> 🌺</b>\n\n<b>This file will be  deleted in {get_exp_time(SECONDS)}. Please save or forward it to your saved messages before it gets deleted.</b>")
                 await asyncio.sleep(SECONDS)    
                 for snt_msg in snt_msgs:    
                     try:    
@@ -259,8 +259,82 @@ async def start_command(client: Client, message: Message):
             return
     return
 
-
+# New feature to generate shareable link
+@Bot.on_message(filters.command('new') & filters.private)
+async def generate_shareable_link(client: Bot, message: Message):
+    if not message.reply_to_message:
+        await message.reply("Please reply to a message containing a link with /new command.")
+        return
     
+    # Extract link from replied message
+    text = message.reply_to_message.text or message.reply_to_message.caption
+    if not text:
+        await message.reply("No text found in the replied message.")
+        return
+    
+    # Simple link extraction (you may need more sophisticated regex)
+    links = [word for word in text.split() if word.startswith(('http://', 'https://'))]
+    if not links:
+        await message.reply("No valid link found in the replied message.")
+        return
+    
+    original_link = links[0]
+    
+    # Generate a unique identifier for the link
+    unique_id = str(hash(original_link))[-8:]
+    base64_string = await encode(f"newlink-{unique_id}")
+    
+    # Create the new shareable link
+    new_link = f"https://t.me/{client.username}?start={base64_string}"
+    
+    # Store the original link mapping in database (you need to implement this)
+    # await store_link_mapping(unique_id, original_link)
+    
+    # Create reply markup with Join Channel button
+    reply_markup = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Join Channel", url=original_link)
+            ]
+        ]
+    )
+    
+    # Send the response
+    await message.reply(
+        text=f"Here is your shareable link! Click below to proceed:\n\n{new_link}",
+        reply_markup=reply_markup,
+        disable_web_page_preview=True
+    )
+
+# Add this handler to process the new link when clicked
+@Bot.on_message(filters.command('start') & filters.private & filters.regex(r'newlink-'))
+async def handle_new_link(client: Bot, message: Message):
+    try:
+        base64_string = message.text.split()[1]
+        _string = await decode(base64_string)
+        unique_id = _string.split('-')[1]
+        
+        # Retrieve original link from database (you need to implement this)
+        # original_link = await get_link_mapping(unique_id)
+        # For now using a placeholder
+        original_link = "https://t.me/example_channel"  # Replace with actual link retrieval
+        
+        reply_markup = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("Join Channel", url=original_link)
+                ]
+            ]
+        )
+        
+        await message.reply(
+            text="Here is your link! Click below to proceed:",
+            reply_markup=reply_markup
+        )
+    except Exception as e:
+        await message.reply("Error processing your request. Please try again later.")
+        print(f"Error in handle_new_link: {e}")
+
 #=====================================================================================#
 
 WAIT_MSG = """<b>Processing ...</b>"""
@@ -542,5 +616,3 @@ if USE_PAYMENT:
             print(e)
             await message.reply("Some error occurred.\nCheck logs.. 😖\nIf you got premium added message then its ok.")
         return
-
-        
