@@ -16,34 +16,6 @@ from database.database import add_admin, add_user, del_admin, del_user, full_adm
 # Add this near the top with other imports
 from database.database import link_data
 
-# Then in the start_command function, add this condition:
-if len(message.text) > 7:
-    try:
-        base64_string = message.text.split(" ", 1)[1]
-        _string = await decode(base64_string)
-        
-        # Handle link forwarding
-        if _string.startswith("link-"):
-            hash = _string.split("-")[1]
-            link_info = await link_data.find_one({'hash': hash})
-            if link_info:
-                # Increment click count
-                await link_data.update_one(
-                    {'hash': hash},
-                    {'$inc': {'clicks': 1}}
-                )
-                
-                # Send the link with button
-                await message.reply_text(
-                    "Here is your link! Click below to proceed:",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("Open Link", url=link_info['original_url'])]
-                    ])
-                )
-                return
-    except:
-        pass
-
 SECONDS = TIME 
 TUT_VID = f"{TUT_VID}"
 
@@ -344,6 +316,34 @@ async def not_joined(client: Client, message: Message):
         quote=True,
         disable_web_page_preview=True
     )
+
+# Then in the start_command function, add this right after verifying subscriptions
+if len(message.text) > 7:
+    try:
+        base64_string = message.text.split(" ", 1)[1]
+        _string = await decode(base64_string)
+        
+        # Handle link forwarding
+        if _string.startswith("link-"):
+            hash = _string.split("-")[1]
+            link_info = await link_data.find_one({'hash': hash})
+            if link_info:
+                # Increment click count
+                await link_data.update_one(
+                    {'hash': hash},
+                    {'$inc': {'clicks': 1}}
+                )
+                
+                # Send the link with button
+                await message.reply_text(
+                    "Here is your link! Click below to proceed:",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Open Link", url=link_info['original_url'])]
+                    ])
+                )
+                return
+    except:
+        pass
 
 
 @Bot.on_message(filters.command('ch2l') & filters.private)
