@@ -83,6 +83,26 @@ async def del_user(user_id: int):
     await user_data.delete_one({'_id': user_id})
     return
 
+# Add this near other collection definitions
+link_mappings = database['link_mappings']
+
+async def store_link_mapping(unique_id: str, original_link: str):
+    await link_mappings.insert_one({
+        'unique_id': unique_id,
+        'original_link': original_link,
+        'created_at': time.time(),
+        'clicks': 0
+    })
+
+async def get_link_mapping(unique_id: str):
+    return await link_mappings.find_one({'unique_id': unique_id})
+
+async def increment_link_clicks(unique_id: str):
+    await link_mappings.update_one(
+        {'unique_id': unique_id},
+        {'$inc': {'clicks': 1}}
+    )
+
 #admins
 
 async def present_admin(user_id: int):
