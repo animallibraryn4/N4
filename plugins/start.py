@@ -262,51 +262,46 @@ async def start_command(client: Client, message: Message):
 # New feature to generate shareable link
 @Bot.on_message(filters.command('new') & filters.private)
 async def generate_shareable_link(client: Bot, message: Message):
-    if not message.reply_to_message:
-        await message.reply("Please reply to a message containing a link with /new command.")
-        return
-    
-    # Extract link from replied message
-    text = message.reply_to_message.text or message.reply_to_message.caption
-    if not text:
-        await message.reply("No text found in the replied message.")
-        return
-    
-    # Simple link extraction (you may need more sophisticated regex)
-    links = [word for word in text.split() if word.startswith(('http://', 'https://'))]
-    if not links:
-        await message.reply("No valid link found in the replied message.")
-        return
-    
-    original_link = links[0]
-    
-    # Generate a unique identifier for the link
-    unique_id = str(hash(original_link))[-8:]
-    base64_string = await encode(f"newlink-{unique_id}")
-    
-    # Create the new shareable link
-    new_link = f"https://t.me/{client.username}?start={base64_string}"
-    
-    # Store the original link mapping in database (you need to implement this)
-    # await store_link_mapping(unique_id, original_link)
-    
-    # Create reply markup with Join Channel button
-    reply_markup = InlineKeyboardMarkup(
-        [
+    try:
+        if not message.reply_to_message:
+            await message.reply("🔹 Please reply to a message containing a link with /new command.")
+            return
+        
+        text = message.reply_to_message.text or message.reply_to_message.caption or ""
+        links = re.findall(r'https?://(?:[-\w.]|(?:%[\da-fA-F]{2}))+[/\w .-]*', text)
+        
+        if not links:
+            await message.reply("🔸 No valid link found in the replied message.")
+            return
+        
+        original_link = links[0]
+        unique_id = f"{int(time.time())}{hash(original_link)}"[-12:]
+        base64_string = await encode(f"newlink-{unique_id}")
+        
+        # Store in database
+        await store_link_mapping(unique_id, original_link)
+        
+        new_link = f"https://t.me/{client.username}?start={base64_string}"
+        
+        reply_markup = InlineKeyboardMarkup(
             [
-                InlineKeyboardButton("Join Channel", url=original_link)
+                [InlineKeyboardButton("🔗 Join Channel", url=original_link)],
+                [InlineKeyboardButton("📤 Share Link", url=f"https://t.me/share/url?url={new_link}")]
             ]
-        ]
-    )
-    
-    # Send the response
-    await message.reply(
-        text=f"Here is your shareable link! Click below to proceed:\n\n{new_link}",
-        reply_markup=reply_markup,
-        disable_web_page_preview=True
-    )
+        )
+        
+        await message.reply(
+            text=f"✅ <b>Shareable Link Generated</b>\n\n"
+                 f"🔗 <code>{new_link}</code>\n\n"
+                 f"Click count: 0",
+            reply_markup=reply_markup,
+            disable_web_page_preview=True
+        )
+        
+    except Exception as e:
+        await message.reply(f"❌ Error generating link: {str(e)}")
+        print(f"Error in generate_shareable_link: {e}")
 
-# Add this handler to process the new link when clicked
 @Bot.on_message(filters.command('start') & filters.private & filters.regex(r'newlink-'))
 async def handle_new_link(client: Bot, message: Message):
     try:
@@ -314,25 +309,27 @@ async def handle_new_link(client: Bot, message: Message):
         _string = await decode(base64_string)
         unique_id = _string.split('-')[1]
         
-        # Retrieve original link from database (you need to implement this)
-        # original_link = await get_link_mapping(unique_id)
-        # For now using a placeholder
-        original_link = "https://t.me/example_channel"  # Replace with actual link retrieval
+        # Get from database
+        mapping = await get_link_mapping(unique_id)
+        if not mapping:
+            raise Exception("Link not found in database")
+        
+        original_link = mapping['original_link']
+        await increment_link_clicks(unique_id)
         
         reply_markup = InlineKeyboardMarkup(
             [
-                [
-                    InlineKeyboardButton("Join Channel", url=original_link)
-                ]
+                [InlineKeyboardButton("👉 Join Channel Now 👈", url=original_link)]
             ]
         )
         
         await message.reply(
-            text="Here is your link! Click below to proceed:",
+            text="🎉 <b>Welcome!</b> Click below to join the channel:",
             reply_markup=reply_markup
         )
+        
     except Exception as e:
-        await message.reply("Error processing your request. Please try again later.")
+        await message.reply("⚠️ Sorry, this link appears to be invalid or expired.")
         print(f"Error in handle_new_link: {e}")
 
 #=====================================================================================#
