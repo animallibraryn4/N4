@@ -24,19 +24,19 @@ BOT_STATS_TEXT = os.environ.get("BOTS_STATS_TEXT","<b>BOT UPTIME 🌺</b>\n{upti
 USER_REPLY_TEXT = os.environ.get("USER_REPLY_TEXT", "Don't send me messages directly I'm only File Share bot! 📌")
 
 #your bot token here from https://telegram.me/BotFather
-TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "7917716305:AAE966nwYKi9TAEMk5ZT0cSoKPa40fV67Rw") 
+TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN", "7548613937:AAGK2KhZcUnumGQJ-oY5bh8B9ojU4uI8sBQ") 
 #your api id from https://my.telegram.org/apps
-APP_ID = int(os.environ.get("APP_ID", "28968125"))
+APP_ID = int(os.environ.get("APP_ID", "22299340"))
 #your api hash from https://my.telegram.org/apps
-API_HASH = os.environ.get("API_HASH", "78a3b1d0b43364aba260c4ec0b2f229b")
+API_HASH = os.environ.get("API_HASH", "09b09f3e2ff1306da4a19888f614d937")
 #your channel_id from https://t.me/MissRose_bot by forwarding dummy message to rose and applying command `/id` in reply to that message
 CHANNEL_ID = int(os.environ.get("CHANNEL_ID", "-1001896877147"))
 #your id of telegram can be found by https://t.me/MissRose_bot with '/id' command
-OWNER_ID = int(os.environ.get("OWNER_ID", "6444198928"))
+OWNER_ID = int(os.environ.get("OWNER_ID", "5380609667"))
 #port set to default 8080
 PORT = os.environ.get("PORT", "9080")
 #your database url mongodb only You can use mongo atlas free cloud database
-DB_URL = os.environ.get("DB_URL", "mongodb+srv://nikhil7858978052:r538PqLoSM9f49YM@cluster0.qi5qy.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+DB_URL = os.environ.get("DB_URL", "mongodb+srv://mikota4432:jkJDQuZH6o8pxxZe@cluster0.2vngilq.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
 #your database name
 DB_NAME = os.environ.get("DB_NAME", "nikhil7858978052")
 
@@ -45,7 +45,7 @@ TG_BOT_WORKERS = int(os.environ.get("TG_BOT_WORKERS", "60"))
 #your start default command message.
 START_MSG = os.environ.get("START_MESSAGE", "Hello {first}\n\n<blockquote>I can store private files in Specified Channel and other users can access it from special link. 💾</blockquote>")
 #your telegram tag without @
-OWNER_TAG = os.environ.get("OWNER_TAG", "nikhil_singh52")
+OWNER_TAG = os.environ.get("OWNER_TAG", "Anime_Library_N4")
 #Time in seconds for message delete, put 0 to never delete
 TIME = int(os.environ.get("TIME", "0"))
 
