@@ -51,6 +51,41 @@ if len(message.text) > 7:
                 return
     except:
         pass
+@Bot.on_message(filters.command('start') & filters.private & subscribed & subscribed2)
+async def start_command(client: Client, message: Message):
+    id = message.from_user.id
+
+    if not await present_user(id):
+        try:
+            await add_user(id)
+        except:
+            pass
+
+    verify_status = await get_verify_status(id)
+
+    # >>> THIS BLOCK GOES HERE (inside the function)
+    if len(message.text) > 7:
+        try:
+            base64_string = message.text.split(" ", 1)[1]
+            _string = await decode(base64_string)
+
+            # Check if it's a forwarded link
+            if _string.startswith("link-"):
+                hash = _string.split("-")[1]
+                link_info = await link_data.find_one({'hash': hash})
+                if link_info:
+                    await link_data.update_one({'hash': hash}, {'$inc': {'clicks': 1}})
+                    await message.reply_text(
+                        "Here is your link! Click below to proceed:",
+                        reply_markup=InlineKeyboardMarkup([
+                            [InlineKeyboardButton("Open Link", url=link_info['original_url'])]
+                        ])
+                    )
+                    return
+        except:
+            pass
+    # <<< END BLOCK
+    
     if USE_SHORTLINK and (not U_S_E_P):
         for i in range(1):
             if id in ADMINS:
