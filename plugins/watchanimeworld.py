@@ -19,358 +19,194 @@ class WatchAnimeWorldScraper:
     
     # ==================== CORE FUNCTION ====================
     async def scrape_episode(self, url):
-        """Main scraping function with multiple fallbacks"""
+        """Main scraping function with direct API approach"""
         try:
-            # Try Method 1: Direct ZephyrFlick extraction
-            result = await self.scrape_direct_zephyr(url)
-            if result and "error" not in result:
-                return result
+            print(f"DEBUG: Starting scrape for {url}")
             
-            # Try Method 2: Iframe analysis
-            result = await self.scrape_via_iframe(url)
-            if result and "error" not in result:
-                return result
-            
-            # Try Method 3: Player script analysis
-            result = await self.scrape_via_player_scripts(url)
-            if result and "error" not in result:
-                return result
-            
-            # All methods failed
-            return {"error": "Could not extract video source. Site might be blocking requests."}
-            
-        except Exception as e:
-            return {"error": f"Scraping failed: {str(e)}"}
-    
-    # ==================== METHOD 1: DIRECT ZEPHYR EXTRACTION ====================
-    async def scrape_direct_zephyr(self, url):
-        """Direct extraction from ZephyrFlick iframe"""
-        try:
-            # 1. Fetch episode page
+            # 1️⃣ Fetch episode page
             html = await fetch_url(self.session, url)
             if not html:
                 return {"error": "Failed to fetch episode page"}
             
             soup = BeautifulSoup(html, 'lxml')
             
-            # 2. Find ALL iframes and analyze them
+            # 2️⃣ Extract ZephyrFlick iframe URL
+            iframe_url = None
             iframes = soup.find_all('iframe')
-            zephyr_url = None
             
             for iframe in iframes:
                 src = iframe.get('src', '')
-                if src:
-                    # Check for ZephyrFlick or similar video hosts
-                    video_hosts = ['zephyrflick', 'play.', 'video.', 'stream.', 'embed.']
-                    if any(host in src.lower() for host in video_hosts):
-                        zephyr_url = src
+                if src and 'zephyrflick' in src.lower():
+                    iframe_url = src
+                    break
+            
+            if not iframe_url:
+                # Try to find any video iframe
+                for iframe in iframes:
+                    src = iframe.get('src', '')
+                    if src and ('play.' in src.lower() or 'video.' in src.lower()):
+                        iframe_url = src
                         break
             
-            if not zephyr_url:
+            if not iframe_url:
                 return {"error": "No video iframe found"}
             
-            # 3. Fix URL format
-            if zephyr_url.startswith('//'):
-                zephyr_url = f"https:{zephyr_url}"
-            elif zephyr_url.startswith('/'):
-                zephyr_url = f"https://{self.base_domain}{zephyr_url}"
+            print(f"DEBUG: Found iframe URL: {iframe_url}")
             
-            print(f"DEBUG: Found iframe URL: {zephyr_url}")
+            # 3️⃣ Extract video ID from iframe URL
+            video_id = self.extract_video_id(iframe_url)
+            if not video_id:
+                return {"error": f"Could not extract video ID from: {iframe_url}"}
             
-            # 4. Try to extract video from iframe URL directly
-            # Sometimes the iframe URL itself contains the video ID
-            video_data = await self.extract_from_zephyr_url(zephyr_url, url)
-            if video_data and "error" not in video_data:
-                episode_info = self.extract_episode_info(soup)
-                return {
-                    "success": True,
-                    "episode_info": episode_info,
-                    "player_data": video_data,
-                    "source_url": url,
-                    "method": "direct_zephyr"
-                }
+            print(f"DEBUG: Extracted video ID: {video_id}")
             
-            # 5. If direct extraction failed, try to fetch iframe content
-            print(f"DEBUG: Trying to fetch iframe content: {zephyr_url}")
-            headers = {
-                'User-Agent': USER_AGENT,
-                'Referer': url,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Origin': f'https://{self.base_domain}'
+            # 4️⃣ Try multiple methods to get video URL
+            video_data = await self.get_video_url_by_id(video_id, url)
+            if "error" in video_data:
+                # Try alternative methods
+                video_data = await self.get_video_url_direct(iframe_url, url)
+            
+            if "error" in video_data:
+                return video_data
+            
+            # 5️⃣ Extract episode info
+            episode_info = self.extract_episode_info(soup)
+            
+            # ✅ SUCCESS
+            return {
+                "success": True,
+                "episode_info": episode_info,
+                "player_data": video_data,
+                "source_url": url,
+                "method": "direct_api"
             }
             
-            try:
-                async with self.session.get(zephyr_url, headers=headers, timeout=10) as response:
-                    if response.status == 200:
-                        iframe_html = await response.text()
-                        iframe_soup = BeautifulSoup(iframe_html, 'lxml')
-                        
-                        # Try to extract video from iframe content
-                        video_data = await self.extract_from_iframe_content(iframe_soup, zephyr_url)
-                        if video_data and "error" not in video_data:
-                            episode_info = self.extract_episode_info(soup)
-                            return {
-                                "success": True,
-                                "episode_info": episode_info,
-                                "player_data": video_data,
-                                "source_url": url,
-                                "method": "iframe_content"
-                            }
-            except Exception as e:
-                print(f"DEBUG: Failed to fetch iframe: {str(e)}")
-            
-            return {"error": "Could not extract video from ZephyrFlick"}
-            
         except Exception as e:
-            print(f"DEBUG: Direct Zephyr method error: {str(e)}")
-            return {"error": f"Direct extraction failed: {str(e)}"}
+            print(f"DEBUG: Scraping failed with error: {str(e)}")
+            return {"error": f"Scraping failed: {str(e)}"}
     
-    async def extract_from_zephyr_url(self, zephyr_url, referer):
-        """Extract video data from ZephyrFlick URL pattern"""
-        try:
-            # Pattern: https://play.zephyrflick.top/video/VIDEO_ID
-            # Sometimes this is a direct m3u8 or mp4
-            
-            # Check if URL ends with common video extensions
-            if any(ext in zephyr_url.lower() for ext in ['.m3u8', '.mp4', '.mkv']):
-                return {
-                    "type": "m3u8" if '.m3u8' in zephyr_url.lower() else "mp4",
-                    "url": zephyr_url,
-                    "referer": referer,
-                    "quality": "auto"
-                }
-            
-            # Try to construct m3u8 URL from video ID
-            video_id_match = re.search(r'/video/([a-zA-Z0-9]+)', zephyr_url)
-            if video_id_match:
-                video_id = video_id_match.group(1)
-                # Try common patterns
-                possible_urls = [
-                    f"https://play.zephyrflick.top/videos/{video_id}/playlist.m3u8",
-                    f"https://play.zephyrflick.top/{video_id}/playlist.m3u8",
-                    f"https://play.zephyrflick.top/stream/{video_id}/master.m3u8",
-                    f"https://play.zephyrflick.top/hls/{video_id}/index.m3u8",
-                ]
-                
-                # Test each URL
-                for test_url in possible_urls:
-                    try:
-                        headers = {'User-Agent': USER_AGENT, 'Referer': referer}
-                        async with self.session.head(test_url, headers=headers, timeout=5) as resp:
-                            if resp.status == 200:
-                                return {
-                                    "type": "m3u8",
-                                    "url": test_url,
-                                    "referer": referer,
-                                    "quality": "auto"
-                                }
-                    except:
-                        continue
-            
-            return {"error": "Could not extract from URL pattern"}
-        except Exception as e:
-            return {"error": f"URL extraction failed: {str(e)}"}
+    # ==================== VIDEO ID EXTRACTION ====================
+    def extract_video_id(self, iframe_url):
+        """Extract video ID from iframe URL"""
+        patterns = [
+            r'/video/([a-zA-Z0-9]+)',
+            r'v=([a-zA-Z0-9]+)',
+            r'id=([a-zA-Z0-9]+)',
+            r'embed/([a-zA-Z0-9]+)',
+            r'/([a-zA-Z0-9]{20,})',  # Long alphanumeric IDs
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, iframe_url)
+            if match:
+                return match.group(1)
+        
+        return None
     
-    async def extract_from_iframe_content(self, soup, referer):
-        """Extract video from iframe content"""
+    # ==================== METHOD 1: DIRECT API CALL ====================
+    async def get_video_url_by_id(self, video_id, referer):
+        """Get video URL by calling ZephyrFlick API directly"""
         try:
-            # Method 1: Look for video.js player
-            scripts = soup.find_all('script')
+            # Common ZephyrFlick API endpoints
+            api_endpoints = [
+                f"https://play.zephyrflick.top/api/video/{video_id}",
+                f"https://play.zephyrflick.top/api/player/{video_id}",
+                f"https://play.zephyrflick.top/api/source/{video_id}",
+                f"https://play.zephyrflick.top/embed/{video_id}",
+                f"https://play.zephyrflick.top/v/{video_id}",
+            ]
             
-            for script in scripts:
-                if not script.string:
-                    continue
+            headers = {
+                'User-Agent': USER_AGENT,
+                'Referer': 'https://watchanimeworld.net/',
+                'Accept': 'application/json, text/plain, */*',
+                'Origin': 'https://play.zephyrflick.top',
+                'X-Requested-With': 'XMLHttpRequest',
+            }
+            
+            for api_url in api_endpoints:
+                print(f"DEBUG: Trying API endpoint: {api_url}")
                 
-                script_text = script.string
-                
-                # Look for video source URLs
-                url_patterns = [
-                    r'(https?://[^"\']+\.(?:m3u8|mp4|mkv)[^"\']*)',
-                    r'["\'](//[^"\']+\.(?:m3u8|mp4|mkv))["\']',
-                    r'file\s*[=:]\s*["\']([^"\']+\.(?:m3u8|mp4|mkv))["\']',
-                    r'src\s*[=:]\s*["\']([^"\']+\.(?:m3u8|mp4|mkv))["\']',
-                    r'url\s*[=:]\s*["\']([^"\']+\.(?:m3u8|mp4|mkv))["\']',
-                ]
-                
-                for pattern in url_patterns:
-                    matches = re.findall(pattern, script_text, re.IGNORECASE)
-                    for match in matches:
-                        url = match if isinstance(match, str) else match[0]
-                        if url:
-                            # Fix URL if needed
-                            if url.startswith('//'):
-                                url = f"https:{url}"
+                try:
+                    async with self.session.get(api_url, headers=headers, timeout=10) as response:
+                        if response.status == 200:
+                            content_type = response.headers.get('Content-Type', '')
                             
-                            return {
-                                "type": "m3u8" if '.m3u8' in url.lower() else "mp4",
-                                "url": url,
-                                "referer": referer,
-                                "quality": "auto"
-                            }
-            
-            # Method 2: Look for JSON configuration
-            for script in scripts:
-                if not script.string:
-                    continue
-                
-                # Try to find JSON data
-                json_patterns = [
-                    r'(\{.*?"sources".*?\})',
-                    r'(\{.*?"file".*?\})',
-                    r'(\{.*?"src".*?\})',
-                    r'playerConfig\s*=\s*(\{.*?\})',
-                    r'config\s*=\s*(\{.*?\})',
-                ]
-                
-                for pattern in json_patterns:
-                    matches = re.findall(pattern, script.string, re.DOTALL)
-                    for match in matches:
-                        try:
-                            data = json.loads(match)
-                            # Check for video sources
-                            if isinstance(data, dict):
-                                # Sources array
-                                if data.get("sources") and isinstance(data["sources"], list):
-                                    for source in data["sources"]:
-                                        if source.get("file"):
-                                            url = source["file"]
-                                            return {
-                                                "type": "m3u8" if '.m3u8' in url.lower() else "mp4",
-                                                "url": url,
-                                                "referer": referer,
-                                                "quality": source.get("label", "auto")
-                                            }
+                            if 'application/json' in content_type:
+                                data = await response.json()
+                                print(f"DEBUG: API response: {json.dumps(data, indent=2)[:200]}...")
                                 
-                                # Direct file
-                                if data.get("file"):
-                                    url = data["file"]
+                                # Parse JSON response
+                                video_url = self.extract_url_from_json(data)
+                                if video_url:
                                     return {
-                                        "type": "m3u8" if '.m3u8' in url.lower() else "mp4",
-                                        "url": url,
+                                        "type": "m3u8" if '.m3u8' in video_url.lower() else "mp4",
+                                        "url": video_url,
                                         "referer": referer,
                                         "quality": "auto"
                                     }
-                        except json.JSONDecodeError:
-                            continue
-            
-            # Method 3: Look for video tags
-            video_tags = soup.find_all('video')
-            for video in video_tags:
-                # Check source tags
-                sources = video.find_all('source')
-                for source in sources:
-                    src = source.get('src')
-                    if src:
-                        return {
-                            "type": "m3u8" if '.m3u8' in src.lower() else "mp4",
-                            "url": src,
-                            "referer": referer,
-                            "quality": source.get('label', 'auto')
-                        }
-                
-                # Check video src directly
-                if video.get('src'):
-                    src = video.get('src')
-                    return {
-                        "type": "m3u8" if '.m3u8' in src.lower() else "mp4",
-                        "url": src,
-                        "referer": referer,
-                        "quality": "auto"
-                    }
-            
-            return {"error": "No video source found in iframe"}
-            
-        except Exception as e:
-            return {"error": f"Iframe extraction failed: {str(e)}"}
-    
-    # ==================== METHOD 2: IFRAME ANALYSIS ====================
-    async def scrape_via_iframe(self, url):
-        """Alternative iframe analysis method"""
-        try:
-            html = await fetch_url(self.session, url)
-            if not html:
-                return {"error": "Failed to fetch page"}
-            
-            soup = BeautifulSoup(html, 'lxml')
-            
-            # Look for iframes with video content
-            iframes = soup.find_all('iframe')
-            
-            for iframe in iframes:
-                src = iframe.get('src', '')
-                if not src:
+                            else:
+                                # HTML response, try to extract from it
+                                html = await response.text()
+                                soup = BeautifulSoup(html, 'lxml')
+                                
+                                # Try to find video sources in the HTML
+                                video_url = await self.extract_from_html_response(soup)
+                                if video_url:
+                                    return {
+                                        "type": "m3u8" if '.m3u8' in video_url.lower() else "mp4",
+                                        "url": video_url,
+                                        "referer": referer,
+                                        "quality": "auto"
+                                    }
+                                
+                except Exception as e:
+                    print(f"DEBUG: API call failed for {api_url}: {str(e)}")
                     continue
-                
-                # Fix URL
-                if src.startswith('//'):
-                    src = f"https:{src}"
-                
-                print(f"DEBUG: Analyzing iframe: {src}")
-                
-                # Try to extract video from this iframe
-                video_data = await self.analyze_iframe_for_video(src, url)
-                if video_data and "error" not in video_data:
-                    episode_info = self.extract_episode_info(soup)
-                    return {
-                        "success": True,
-                        "episode_info": episode_info,
-                        "player_data": video_data,
-                        "source_url": url,
-                        "method": "iframe_analysis"
-                    }
             
-            return {"error": "No video found in iframes"}
+            return {"error": "All API endpoints failed"}
+            
         except Exception as e:
-            return {"error": f"Iframe analysis failed: {str(e)}"}
+            print(f"DEBUG: API method error: {str(e)}")
+            return {"error": f"API method failed: {str(e)}"}
     
-    async def analyze_iframe_for_video(self, iframe_url, referer):
-        """Analyze iframe URL for video sources"""
+    def extract_url_from_json(self, data):
+        """Extract video URL from JSON response"""
         try:
-            headers = {
-                'User-Agent': USER_AGENT,
-                'Referer': referer,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            }
+            # Try different JSON structures
+            if isinstance(data, dict):
+                # Direct URL
+                if data.get("url") and ('.m3u8' in data["url"].lower() or '.mp4' in data["url"].lower()):
+                    return data["url"]
+                
+                if data.get("file") and ('.m3u8' in data["file"].lower() or '.mp4' in data["file"].lower()):
+                    return data["file"]
+                
+                if data.get("source") and ('.m3u8' in data["source"].lower() or '.mp4' in data["source"].lower()):
+                    return data["source"]
+                
+                # Sources array
+                if data.get("sources") and isinstance(data["sources"], list):
+                    for source in data["sources"]:
+                        if source.get("file") and ('.m3u8' in source["file"].lower() or '.mp4' in source["file"].lower()):
+                            return source["file"]
+                
+                # Data field
+                if data.get("data"):
+                    if isinstance(data["data"], str):
+                        # Try to find URL in string
+                        url_match = re.search(r'(https?://[^\s"\']+\.(?:m3u8|mp4)[^\s"\']*)', data["data"])
+                        if url_match:
+                            return url_match.group(1)
             
-            async with self.session.get(iframe_url, headers=headers, timeout=10) as response:
-                if response.status != 200:
-                    return {"error": f"HTTP {response.status}"}
-                
-                html = await response.text()
-                soup = BeautifulSoup(html, 'lxml')
-                
-                # Try multiple extraction methods
-                methods = [
-                    self.extract_from_scripts,
-                    self.extract_from_video_tags,
-                    self.extract_from_json_ld,
-                ]
-                
-                for method in methods:
-                    try:
-                        result = method(soup, iframe_url)
-                        if result and "error" not in result:
-                            return result
-                    except:
-                        continue
-                
-                return {"error": "No video found"}
-                
-        except Exception as e:
-            return {"error": f"Iframe analysis error: {str(e)}"}
+            return None
+        except:
+            return None
     
-    # ==================== METHOD 3: PLAYER SCRIPT ANALYSIS ====================
-    async def scrape_via_player_scripts(self, url):
-        """Extract from player scripts on main page"""
+    async def extract_from_html_response(self, soup):
+        """Extract video URL from HTML API response"""
         try:
-            html = await fetch_url(self.session, url)
-            if not html:
-                return {"error": "Failed to fetch page"}
-            
-            soup = BeautifulSoup(html, 'lxml')
-            
-            # Look for player-related scripts
+            # Look for script tags with video data
             scripts = soup.find_all('script')
             
             for script in scripts:
@@ -379,119 +215,115 @@ class WatchAnimeWorldScraper:
                 
                 script_text = script.string
                 
-                # Look for player initialization
-                player_keywords = ['videojs', 'jwplayer', 'clappr', 'flowplayer', 'player']
-                if any(keyword in script_text.lower() for keyword in player_keywords):
-                    # Extract video URLs
-                    url_patterns = [
-                        r'(https?://[^"\']+\.(?:m3u8|mp4|mkv)[^"\']*)',
-                        r'["\'](//[^"\']+\.(?:m3u8|mp4|mkv))["\']',
-                    ]
-                    
-                    for pattern in url_patterns:
-                        matches = re.findall(pattern, script_text, re.IGNORECASE)
-                        for match in matches:
-                            url_found = match if isinstance(match, str) else match[0]
-                            if url_found:
-                                # Fix URL
-                                if url_found.startswith('//'):
-                                    url_found = f"https:{url_found}"
-                                
-                                episode_info = self.extract_episode_info(soup)
-                                return {
-                                    "success": True,
-                                    "episode_info": episode_info,
-                                    "player_data": {
-                                        "type": "m3u8" if '.m3u8' in url_found.lower() else "mp4",
-                                        "url": url_found,
-                                        "referer": url,
-                                        "quality": "auto"
-                                    },
-                                    "source_url": url,
-                                    "method": "player_script"
-                                }
+                # Look for JW Player
+                if 'jwplayer(' in script_text:
+                    jw_pattern = r'jwplayer\([^)]+\)\.setup\((\{.*?\})\);'
+                    match = re.search(jw_pattern, script_text, re.DOTALL)
+                    if match:
+                        try:
+                            config = json.loads(match.group(1))
+                            if config.get("sources"):
+                                for source in config["sources"]:
+                                    if source.get("file"):
+                                        return source["file"]
+                        except:
+                            pass
+                
+                # Look for video.js
+                if 'videojs(' in script_text:
+                    sources_pattern = r'sources\s*:\s*\[(.*?)\]'
+                    match = re.search(sources_pattern, script_text, re.DOTALL)
+                    if match:
+                        sources_text = match.group(1)
+                        url_match = re.search(r'["\'](https?://[^"\']+\.(?:m3u8|mp4)[^"\']*)["\']', sources_text)
+                        if url_match:
+                            return url_match.group(1)
             
-            return {"error": "No player scripts found"}
+            # Look for video tags
+            video_tags = soup.find_all('video')
+            for video in video_tags:
+                sources = video.find_all('source')
+                for source in sources:
+                    src = source.get('src')
+                    if src and ('.m3u8' in src.lower() or '.mp4' in src.lower()):
+                        return src
+            
+            return None
         except Exception as e:
-            return {"error": f"Script analysis failed: {str(e)}"}
+            print(f"DEBUG: HTML extraction error: {str(e)}")
+            return None
     
-    # ==================== HELPER EXTRACTION METHODS ====================
-    def extract_from_scripts(self, soup, referer):
-        """Extract video from scripts"""
-        scripts = soup.find_all('script')
-        
-        for script in scripts:
-            if not script.string:
-                continue
+    # ==================== METHOD 2: DIRECT IFRAME FETCH ====================
+    async def get_video_url_direct(self, iframe_url, referer):
+        """Try to fetch iframe directly with bypass headers"""
+        try:
+            print(f"DEBUG: Trying direct iframe fetch: {iframe_url}")
             
-            # Look for m3u8 URLs
-            m3u8_pattern = r'(https?://[^"\']+\.m3u8[^"\']*)'
-            matches = re.findall(m3u8_pattern, script.string, re.IGNORECASE)
+            # Use browser-like headers to bypass anti-bot
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Referer': referer,
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'iframe',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'cross-site',
+                'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+            }
             
-            for match in matches:
-                if match:
-                    return {
-                        "type": "m3u8",
-                        "url": match,
-                        "referer": referer,
-                        "quality": "auto"
-                    }
-        
-        return {"error": "No video in scripts"}
-    
-    def extract_from_video_tags(self, soup, referer):
-        """Extract video from video tags"""
-        video_tags = soup.find_all('video')
-        
-        for video in video_tags:
-            # Check source tags
-            sources = video.find_all('source')
-            for source in sources:
-                src = source.get('src')
-                if src:
-                    return {
-                        "type": "m3u8" if '.m3u8' in src.lower() else "mp4",
-                        "url": src,
-                        "referer": referer,
-                        "quality": source.get('label', 'auto')
-                    }
-            
-            # Check video src directly
-            if video.get('src'):
-                src = video.get('src')
-                return {
-                    "type": "m3u8" if '.m3u8' in src.lower() else "mp4",
-                    "url": src,
-                    "referer": referer,
-                    "quality": "auto"
-                }
-        
-        return {"error": "No video tags found"}
-    
-    def extract_from_json_ld(self, soup, referer):
-        """Extract from JSON-LD structured data"""
-        scripts = soup.find_all('script', type='application/ld+json')
-        
-        for script in scripts:
-            if not script.string:
-                continue
-            
-            try:
-                data = json.loads(script.string)
-                # Check for video content
-                if isinstance(data, dict) and data.get('contentUrl'):
-                    url = data['contentUrl']
-                    if any(ext in url.lower() for ext in ['.m3u8', '.mp4', '.mkv']):
+            async with self.session.get(iframe_url, headers=headers, timeout=15) as response:
+                print(f"DEBUG: Direct fetch status: {response.status}")
+                
+                if response.status == 200:
+                    html = await response.text()
+                    print(f"DEBUG: Received {len(html)} bytes from iframe")
+                    
+                    soup = BeautifulSoup(html, 'lxml')
+                    
+                    # Try to extract video URL
+                    video_url = await self.extract_from_html_response(soup)
+                    if video_url:
                         return {
-                            "type": "m3u8" if '.m3u8' in url.lower() else "mp4",
-                            "url": url,
-                            "referer": referer,
+                            "type": "m3u8" if '.m3u8' in video_url.lower() else "mp4",
+                            "url": video_url,
+                            "referer": iframe_url,
                             "quality": "auto"
                         }
-            except:
-                continue
-        
-        return {"error": "No JSON-LD video found"}
+                    
+                    # Try to find in scripts
+                    scripts = soup.find_all('script')
+                    for script in scripts:
+                        if not script.string:
+                            continue
+                        
+                        # Look for m3u8 URL
+                        m3u8_pattern = r'(https?://[^\s"\']+\.m3u8[^\s"\']*)'
+                        match = re.search(m3u8_pattern, script.string)
+                        if match:
+                            return {
+                                "type": "m3u8",
+                                "url": match.group(1),
+                                "referer": iframe_url,
+                                "quality": "auto"
+                            }
+                
+                elif response.status == 403:
+                    return {"error": "Access forbidden (403). Site is blocking requests."}
+                elif response.status == 404:
+                    return {"error": "Video not found (404)."}
+                else:
+                    return {"error": f"HTTP {response.status} from iframe"}
+            
+            return {"error": "Direct fetch failed"}
+            
+        except Exception as e:
+            print(f"DEBUG: Direct fetch error: {str(e)}")
+            return {"error": f"Direct fetch failed: {str(e)}"}
     
     # ==================== EPISODE INFO ====================
     def extract_episode_info(self, soup):
