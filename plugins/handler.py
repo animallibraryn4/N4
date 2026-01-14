@@ -10,6 +10,138 @@ from database import db
 from plugins.debug import debug_url
 import asyncio
 
+@Client.on_message(filters.command("analyze_embed") & filters.private)
+async def analyze_embed_command(client, message: Message):
+    """Download and analyze embed page content"""
+    if len(message.command) < 2:
+        await message.reply_text("Usage: /analyze_embed <url>")
+        return
+    
+    url = message.command[1]
+    msg = await message.reply_text(f"🔍 Analyzing embed page for {url}...")
+    
+    try:
+        import aiohttp
+        from bs4 import BeautifulSoup
+        import re
+        
+        async with aiohttp.ClientSession() as session:
+            # Fetch episode page
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://watchanimeworld.net/'
+            }
+            
+            async with session.get(url, headers=headers) as response:
+                html = await response.text()
+            
+            soup = BeautifulSoup(html, 'lxml')
+            
+            # Find iframe
+            iframes = soup.find_all('iframe')
+            video_iframe = None
+            
+            for iframe in iframes:
+                src = iframe.get('src', '')
+                if src and 'zephyrflick' in src.lower():
+                    video_iframe = src
+                    break
+            
+            if not video_iframe:
+                await msg.edit_text("❌ No ZephyrFlick iframe found")
+                return
+            
+            # Get embed URL
+            embed_url = video_iframe.replace('/video/', '/embed/')
+            
+            # Fetch embed page
+            embed_headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': url,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            }
+            
+            async with session.get(embed_url, headers=embed_headers) as embed_response:
+                if embed_response.status != 200:
+                    await msg.edit_text(f"❌ Embed page returned {embed_response.status}")
+                    return
+                
+                embed_html = await embed_response.text()
+                embed_soup = BeautifulSoup(embed_html, 'lxml')
+            
+            # Analyze the embed page
+            analysis = []
+            
+            # 1. Basic info
+            analysis.append(f"📊 **Basic Info:**")
+            analysis.append(f"• Iframe URL: {video_iframe}")
+            analysis.append(f"• Embed URL: {embed_url}")
+            analysis.append(f"• Embed HTML length: {len(embed_html)} chars")
+            
+            # 2. Script tags
+            scripts = embed_soup.find_all('script')
+            analysis.append(f"\n📜 **Script Tags:** {len(scripts)}")
+            
+            for i, script in enumerate(scripts[:5], 1):
+                has_content = "Yes" if script.string else "No"
+                length = len(script.string) if script.string else 0
+                src = script.get('src', 'No src')
+                analysis.append(f"  {i}. Has content: {has_content}, Length: {length}, Src: {src[:50]}...")
+            
+            # 3. Video tags
+            video_tags = embed_soup.find_all('video')
+            analysis.append(f"\n🎬 **Video Tags:** {len(video_tags)}")
+            
+            for i, video in enumerate(video_tags, 1):
+                src = video.get('src', 'No src')
+                analysis.append(f"  {i}. Src: {src[:50]}...")
+                sources = video.find_all('source')
+                for j, source in enumerate(sources, 1):
+                    source_src = source.get('src', 'No src')
+                    analysis.append(f"     Source {j}: {source_src[:50]}...")
+            
+            # 4. Look for m3u8 in entire HTML
+            m3u8_pattern = r'(https?://[^\s"\']+\.m3u8[^\s"\']*)'
+            m3u8_matches = re.findall(m3u8_pattern, embed_html, re.IGNORECASE)
+            
+            analysis.append(f"\n🔗 **M3U8 URLs found:** {len(m3u8_matches)}")
+            for i, match in enumerate(m3u8_matches[:3], 1):
+                analysis.append(f"  {i}. {match[:80]}...")
+            
+            # 5. Look for mp4 in entire HTML
+            mp4_pattern = r'(https?://[^\s"\']+\.mp4[^\s"\']*)'
+            mp4_matches = re.findall(mp4_pattern, embed_html, re.IGNORECASE)
+            
+            analysis.append(f"\n🎥 **MP4 URLs found:** {len(mp4_matches)}")
+            for i, match in enumerate(mp4_matches[:3], 1):
+                analysis.append(f"  {i}. {match[:80]}...")
+            
+            # 6. Check for player initialization
+            player_keywords = ['jwplayer', 'videojs', 'clappr', 'flowplayer', 'player(']
+            found_players = []
+            
+            for keyword in player_keywords:
+                if keyword in embed_html.lower():
+                    found_players.append(keyword)
+            
+            analysis.append(f"\n🎮 **Player Libraries:** {', '.join(found_players) if found_players else 'None'}")
+            
+            # Send analysis
+            response_text = "\n".join(analysis)
+            
+            # If too long, send as file
+            if len(response_text) > 4000:
+                with open('embed_analysis.txt', 'w', encoding='utf-8') as f:
+                    f.write(response_text)
+                
+                await msg.delete()
+                await message.reply_document('embed_analysis.txt', caption="Embed Page Analysis")
+            else:
+                await msg.edit_text(response_text)
+            
+    except Exception as e:
+        await msg.edit_text(f"❌ Analysis failed: {str(e)}")
+
 @Client.on_message(filters.command("test_api") & filters.private)
 async def test_api_command(client, message: Message):
     """Test direct API approach"""
@@ -291,6 +423,7 @@ async def link_handler(client, message: Message):
     # Add to queue
     from plugins.queue import add_to_queue
     await add_to_queue(client, message, url)
+
 
 
 
