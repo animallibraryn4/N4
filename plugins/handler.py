@@ -11,6 +11,59 @@ from pyrogram.types import Message
 from plugins.debug import debug_url
 import asyncio
 
+@Client.on_message(filters.command("test_zephyr") & filters.private)
+async def test_zephyr_command(client, message: Message):
+    """Test ZephyrFlick extraction specifically"""
+    if len(message.command) < 2:
+        await message.reply_text("Usage: /test_zephyr <url>")
+        return
+    
+    url = message.command[1]
+    msg = await message.reply_text(f"🔍 Testing ZephyrFlick extraction on {url}")
+    
+    try:
+        # Manual test without the class
+        async with aiohttp.ClientSession() as session:
+            # 1. Fetch episode page
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://watchanimeworld.net/'
+            }
+            
+            async with session.get(url, headers=headers) as response:
+                html = await response.text()
+            
+            soup = BeautifulSoup(html, 'lxml')
+            
+            # 2. Find iframes
+            iframes = soup.find_all('iframe')
+            iframe_info = []
+            
+            for i, iframe in enumerate(iframes, 1):
+                src = iframe.get('src', 'NO SRC')
+                iframe_info.append(f"{i}. {src[:80]}...")
+            
+            # 3. Find player divs
+            player_divs = []
+            for div in soup.find_all('div'):
+                classes = div.get('class', [])
+                if isinstance(classes, str):
+                    classes = [classes]
+                if any(keyword in ' '.join(classes).lower() for keyword in ['player', 'video', 'stream']):
+                    player_divs.append(div)
+            
+            # 4. Send detailed info
+            await msg.edit_text(
+                f"📊 Page Analysis:\n\n"
+                f"📺 Iframes found: {len(iframes)}\n"
+                f"{chr(10).join(iframe_info[:5]) if iframe_info else 'None'}\n\n"
+                f"🎬 Player divs: {len(player_divs)}\n"
+                f"🔍 First player classes: {player_divs[0].get('class') if player_divs else 'None'}"
+            )
+            
+    except Exception as e:
+        await msg.edit_text(f"❌ Test failed: {str(e)}")
+
 @Client.on_message(filters.command("debug") & filters.private)
 async def debug_command(client, message: Message):
     """Debug command to test URLs"""
@@ -123,3 +176,4 @@ async def link_handler(client, message: Message):
     # Add to queue
     from plugins.queue import add_to_queue
     await add_to_queue(client, message, url)
+
