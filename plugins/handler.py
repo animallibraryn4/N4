@@ -10,6 +10,121 @@ from database import db
 from plugins.debug import debug_url
 import asyncio
 
+@Client.on_message(filters.command("test_api") & filters.private)
+async def test_api_command(client, message: Message):
+    """Test direct API approach"""
+    if len(message.command) < 2:
+        await message.reply_text("Usage: /test_api <url>")
+        return
+    
+    url = message.command[1]
+    msg = await message.reply_text(f"🔍 Testing direct API method on {url}...")
+    
+    try:
+        # Manual test to see what's happening
+        import aiohttp
+        from bs4 import BeautifulSoup
+        
+        async with aiohttp.ClientSession() as session:
+            # Fetch episode page
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://watchanimeworld.net/'
+            }
+            
+            async with session.get(url, headers=headers) as response:
+                html = await response.text()
+            
+            soup = BeautifulSoup(html, 'lxml')
+            
+            # Find iframe
+            iframes = soup.find_all('iframe')
+            video_iframe = None
+            
+            for iframe in iframes:
+                src = iframe.get('src', '')
+                if src and 'zephyrflick' in src.lower():
+                    video_iframe = src
+                    break
+            
+            if not video_iframe:
+                await msg.edit_text("❌ No ZephyrFlick iframe found")
+                return
+            
+            # Extract video ID
+            import re
+            video_id_match = re.search(r'/video/([a-zA-Z0-9]+)', video_iframe)
+            
+            if not video_id_match:
+                await msg.edit_text(f"❌ Could not extract video ID from: {video_iframe}")
+                return
+            
+            video_id = video_id_match.group(1)
+            
+            # Try different API endpoints
+            api_endpoints = [
+                f"https://play.zephyrflick.top/api/video/{video_id}",
+                f"https://play.zephyrflick.top/api/player/{video_id}",
+                f"https://play.zephyrflick.top/api/source/{video_id}",
+                f"https://play.zephyrflick.top/embed/{video_id}",
+            ]
+            
+            results = []
+            for api_url in api_endpoints:
+                try:
+                    api_headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Referer': 'https://watchanimeworld.net/',
+                        'Accept': 'application/json, text/plain, */*',
+                    }
+                    
+                    async with session.get(api_url, headers=api_headers, timeout=10) as api_response:
+                        status = api_response.status
+                        content_type = api_response.headers.get('Content-Type', '')
+                        
+                        if status == 200:
+                            if 'application/json' in content_type:
+                                data = await api_response.json()
+                                results.append(f"✅ {api_url}\n   Status: {status}\n   Type: JSON\n   Data: {str(data)[:100]}...")
+                            else:
+                                text = await api_response.text()
+                                results.append(f"✅ {api_url}\n   Status: {status}\n   Type: {content_type}\n   Length: {len(text)} chars")
+                        else:
+                            results.append(f"❌ {api_url}\n   Status: {status}")
+                            
+                except Exception as e:
+                    results.append(f"❌ {api_url}\n   Error: {str(e)}")
+            
+            # Also try to fetch iframe directly
+            try:
+                iframe_headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Referer': url,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                }
+                
+                async with session.get(video_iframe, headers=iframe_headers, timeout=10) as iframe_response:
+                    iframe_status = iframe_response.status
+                    if iframe_status == 200:
+                        iframe_html = await iframe_response.text()
+                        results.append(f"\n📺 Iframe Direct:\n   Status: {iframe_status}\n   Length: {len(iframe_html)} chars")
+                    else:
+                        results.append(f"\n📺 Iframe Direct:\n   Status: {iframe_status}")
+            except Exception as e:
+                results.append(f"\n📺 Iframe Direct:\n   Error: {str(e)}")
+            
+            # Send results
+            response_text = (
+                f"🔍 **Test Results**\n\n"
+                f"📺 Iframe URL: {video_iframe}\n"
+                f"🎬 Video ID: {video_id}\n\n"
+                f"**API Tests:**\n{chr(10).join(results)}"
+            )
+            
+            await msg.edit_text(response_text)
+            
+    except Exception as e:
+        await msg.edit_text(f"❌ Test failed: {str(e)}")
 
 @Client.on_message(filters.command("test_zephyr") & filters.private)
 async def test_zephyr_command(client, message: Message):
@@ -176,5 +291,6 @@ async def link_handler(client, message: Message):
     # Add to queue
     from plugins.queue import add_to_queue
     await add_to_queue(client, message, url)
+
 
 
