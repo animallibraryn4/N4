@@ -19,42 +19,233 @@ class WatchAnimeWorldScraper:
     
     # ==================== CORE FUNCTION ====================
     async def scrape_episode(self, url):
-        """Meido-style scraper: Episode URL -> AJAX -> m3u8"""
+        """Hybrid scraper: Try both methods"""
         try:
-            # 1️⃣ Episode page fetch (for episode_id only)
+            # 1️⃣ First try: ZephyrFlick iframe method (for current site)
+            result = await self.scrape_zephyrflick(url)
+            if result and "error" not in result:
+                return result
+            
+            # 2️⃣ Second try: Meido-style AJAX method (if site changes)
+            result = await self.scrape_ajax_method(url)
+            if result and "error" not in result:
+                return result
+            
+            # If both fail
+            return {"error": "No video source found using any method"}
+            
+        except Exception as e:
+            return {"error": f"Scraping failed: {str(e)}"}
+    
+    # ==================== ZEPHYRFLICK METHOD ====================
+    async def scrape_zephyrflick(self, url):
+        """Extract from ZephyrFlick iframe player"""
+        try:
+            # 1. Fetch episode page
             html = await fetch_url(self.session, url)
             if not html:
                 return {"error": "Failed to fetch episode page"}
             
-            # 2️⃣ Extract episode_id (MOST IMPORTANT STEP)
+            soup = BeautifulSoup(html, 'lxml')
+            
+            # 2. Find ZephyrFlick iframe
+            zephyr_iframe = None
+            iframes = soup.find_all('iframe')
+            
+            for iframe in iframes:
+                src = iframe.get('src', '')
+                if 'zephyrflick' in src.lower():
+                    zephyr_iframe = src
+                    break
+            
+            if not zephyr_iframe:
+                # Try alternative player iframe
+                for iframe in iframes:
+                    src = iframe.get('src', '')
+                    if src and 'video' in src.lower():
+                        zephyr_iframe = src
+                        break
+            
+            if not zephyr_iframe:
+                return {"error": "No player iframe found"}
+            
+            # 3. Fix iframe URL if needed
+            if zephyr_iframe.startswith('//'):
+                zephyr_iframe = f"https:{zephyr_iframe}"
+            
+            # 4. Fetch ZephyrFlick player page
+            player_headers = {
+                'User-Agent': USER_AGENT,
+                'Referer': url,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+            }
+            
+            player_html = await fetch_url(self.session, zephyr_iframe, player_headers)
+            if not player_html:
+                return {"error": "Failed to fetch player page"}
+            
+            player_soup = BeautifulSoup(player_html, 'lxml')
+            
+            # 5. Extract video sources from ZephyrFlick
+            video_data = await self.extract_from_zephyrflick(player_soup, zephyr_iframe)
+            if "error" in video_data:
+                return video_data
+            
+            # 6. Extract episode info
+            episode_info = self.extract_episode_info(soup)
+            
+            # ✅ SUCCESS
+            return {
+                "success": True,
+                "episode_info": episode_info,
+                "player_data": video_data,
+                "source_url": url,
+                "method": "zephyrflick_iframe"
+            }
+            
+        except Exception as e:
+            return {"error": f"ZephyrFlick method failed: {str(e)}"}
+    
+    async def extract_from_zephyrflick(self, soup, referer_url):
+        """Extract video URL from ZephyrFlick player"""
+        try:
+            # Method 1: Check for video.js player
+            scripts = soup.find_all('script')
+            
+            for script in scripts:
+                if not script.string:
+                    continue
+                
+                script_text = script.string
+                
+                # Pattern 1: videojs setup with sources
+                if 'videojs(' in script_text or 'player(' in script_text:
+                    # Look for sources array
+                    sources_patterns = [
+                        r'sources\s*:\s*\[(.*?)\]',
+                        r'"sources"\s*:\s*\[(.*?)\]',
+                    ]
+                    
+                    for pattern in sources_patterns:
+                        match = re.search(pattern, script_text, re.DOTALL)
+                        if match:
+                            sources_text = match.group(1)
+                            # Extract URLs from sources
+                            url_pattern = r'["\'](https?://[^"\']+\.(?:m3u8|mp4)[^"\']*)["\']'
+                            urls = re.findall(url_pattern, sources_text)
+                            if urls:
+                                return {
+                                    "type": "m3u8" if '.m3u8' in urls[0].lower() else "mp4",
+                                    "url": urls[0],
+                                    "referer": referer_url,
+                                    "quality": "auto"
+                                }
+                
+                # Pattern 2: Direct m3u8 URL
+                m3u8_patterns = [
+                    r'(https?://[^"\']+\.m3u8[^"\']*)',
+                    r'file\s*[:=]\s*["\'](https?://[^"\']+\.m3u8)["\']',
+                    r'src\s*[:=]\s*["\'](https?://[^"\']+\.m3u8)["\']',
+                ]
+                
+                for pattern in m3u8_patterns:
+                    matches = re.findall(pattern, script_text, re.IGNORECASE)
+                    for match in matches:
+                        url = match if isinstance(match, str) else match[0]
+                        if url and '.m3u8' in url.lower():
+                            return {
+                                "type": "m3u8",
+                                "url": url,
+                                "referer": referer_url,
+                                "quality": "auto"
+                            }
+            
+            # Method 2: Check for JW Player
+            for script in scripts:
+                if not script.string:
+                    continue
+                
+                if 'jwplayer(' in script.string:
+                    # Extract JW Player setup
+                    jw_pattern = r'jwplayer\([^)]+\)\.setup\((\{.*?\})\);'
+                    match = re.search(jw_pattern, script.string, re.DOTALL)
+                    if match:
+                        try:
+                            player_config = json.loads(match.group(1))
+                            if 'sources' in player_config and player_config['sources']:
+                                for source in player_config['sources']:
+                                    if 'file' in source:
+                                        url = source['file']
+                                        return {
+                                            "type": "m3u8" if '.m3u8' in url.lower() else "mp4",
+                                            "url": url,
+                                            "referer": referer_url,
+                                            "quality": source.get('label', 'auto')
+                                        }
+                        except:
+                            pass
+            
+            # Method 3: Look for video tag
+            video_tags = soup.find_all('video')
+            for video in video_tags:
+                # Check source tags
+                source_tags = video.find_all('source')
+                for source in source_tags:
+                    src = source.get('src')
+                    if src:
+                        return {
+                            "type": "m3u8" if '.m3u8' in src.lower() else "mp4",
+                            "url": src,
+                            "referer": referer_url,
+                            "quality": source.get('label', 'auto')
+                        }
+                
+                # Check video src directly
+                if video.get('src'):
+                    src = video['src']
+                    return {
+                        "type": "m3u8" if '.m3u8' in src.lower() else "mp4",
+                        "url": src,
+                        "referer": referer_url,
+                        "quality": "auto"
+                    }
+            
+            return {"error": "No video source found in ZephyrFlick player"}
+            
+        except Exception as e:
+            return {"error": f"ZephyrFlick extraction failed: {str(e)}"}
+    
+    # ==================== AJAX METHOD (KEEP AS BACKUP) ====================
+    async def scrape_ajax_method(self, url):
+        """Meido-style AJAX method (backup)"""
+        try:
+            html = await fetch_url(self.session, url)
+            if not html:
+                return {"error": "Failed to fetch episode page"}
+            
+            # Extract episode ID
             episode_id = self.extract_episode_id(html)
             if not episode_id:
-                # Fallback: try alternate method
-                episode_id = self.extract_id_from_url(url)
-                if not episode_id:
-                    return {"error": "Could not extract episode ID. Please check /debug"}
+                return {"error": "Could not extract episode ID"}
             
-            # 3️⃣ Call WordPress AJAX endpoint (REAL SOURCE)
+            # Try AJAX request
             ajax_response = await self.fetch_player_ajax(episode_id, url)
             if not ajax_response:
-                return {"error": "AJAX request failed. Player data not found."}
+                return {"error": "AJAX request failed"}
             
-            # 4️⃣ Extract m3u8 from AJAX response
-            m3u8_url = self.extract_m3u8_from_response(ajax_response)
+            # Extract m3u8
+            m3u8_url = self.extract_m3u8_from_ajax(ajax_response)
             if not m3u8_url:
-                # Try alternative extraction methods
-                m3u8_url = self.extract_from_json(ajax_response)
-                if not m3u8_url:
-                    return {"error": "No m3u8 found in player data. Response: " + ajax_response[:200]}
+                return {"error": "No m3u8 in AJAX response"}
             
-            # 5️⃣ Validate and fix m3u8 URL
+            # Fix URL
             m3u8_url = self.fix_m3u8_url(m3u8_url)
             
-            # 6️⃣ Episode info (for UI only, not for source)
+            # Episode info
             soup = BeautifulSoup(html, 'lxml')
             episode_info = self.extract_episode_info(soup)
             
-            # ✅ SUCCESS: Return Meido-style response
             return {
                 "success": True,
                 "episode_info": episode_info,
@@ -65,216 +256,108 @@ class WatchAnimeWorldScraper:
                     "quality": "auto"
                 },
                 "source_url": url,
-                "debug": {
-                    "episode_id": episode_id,
-                    "ajax_response_preview": ajax_response[:300] if ajax_response else "None"
-                }
+                "method": "ajax"
             }
             
         except Exception as e:
-            return {"error": f"Scraping failed: {str(e)}"}
+            return {"error": f"AJAX method failed: {str(e)}"}
     
-    # ==================== ID EXTRACTION ====================
     def extract_episode_id(self, html):
-        """Extract episode/post ID from HTML (Meido's first step)"""
+        """Extract episode ID from HTML"""
         patterns = [
-            # WordPress post ID (most common)
             r'data-post=["\'](\d+)["\']',
             r'data-id=["\'](\d+)["\']',
-            r'post["\']?\s*:\s*["\']?(\d+)',
-            
-            # JS variables
             r'episode_id\s*[=:]\s*["\']?(\d+)["\']?',
             r'post_id\s*[=:]\s*["\']?(\d+)["\']?',
-            r'id\s*[=:]\s*["\']?(\d+)["\']?',
-            r'episode["\']?\s*:\s*["\']?(\d+)',
-            
-            # Hidden inputs
-            r'<input[^>]*name=["\']episode_id["\'][^>]*value=["\'](\d+)["\']',
-            r'<input[^>]*name=["\']post_id["\'][^>]*value=["\'](\d+)["\']',
-            
-            # URL patterns in scripts
-            r'ajax\.php\?.*?id=(\d+)',
-            
-            # WordPress nonce patterns (sometimes contains ID)
-            r'ajax_nonce["\']?\s*:\s*["\'][^"\']*-(\d+)["\']',
         ]
         
         for pattern in patterns:
             match = re.search(pattern, html, re.IGNORECASE)
             if match:
                 return match.group(1)
-        
         return None
     
-    def extract_id_from_url(self, url):
-        """Extract ID from URL (fallback method)"""
-        patterns = [
-            r'episode/[^/]+-(\d+)x\d+/',  # gachiakuta-1x1/
-            r'episode/(\d+)/',
-            r'watch/(\d+)/',
-            r'\?p=(\d+)',
-            r'&id=(\d+)',
-        ]
-        
-        for pattern in patterns:
-            match = re.search(pattern, url, re.IGNORECASE)
-            if match:
-                return match.group(1)
-        return None
-    
-    # ==================== AJAX REQUEST ====================
     async def fetch_player_ajax(self, episode_id, referer_url):
-        """Call WordPress admin-ajax.php (REAL SOURCE)"""
+        """Fetch player data via AJAX"""
         ajax_url = f"https://{self.base_domain}/wp-admin/admin-ajax.php"
         
-        # Common WordPress player actions (trying multiple)
-        possible_actions = [
-            "player_ajax",
-            "get_player",
-            "load_player",
-            "episode_player",
-            "anime_player",
-            "watchanimeworld_player",
-            "get_video",
-            "load_video",
-            "wp_ajax_player",
-            "wp_ajax_get_player"
+        actions = [
+            "player_ajax", "get_player", "load_player", 
+            "episode_player", "anime_player"
         ]
         
         headers = {
             "User-Agent": USER_AGENT,
             "Referer": referer_url,
             "X-Requested-With": "XMLHttpRequest",
-            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Origin": f"https://{self.base_domain}"
+            "Content-Type": "application/x-www-form-urlencoded",
         }
         
-        for action in possible_actions:
+        for action in actions:
             try:
-                data = {
-                    "action": action,
-                    "episode_id": episode_id,
-                    "post_id": episode_id,  # Sometimes it's post_id
-                    "id": episode_id,       # Sometimes just id
-                }
+                data = {"action": action, "episode_id": episode_id}
                 
                 async with self.session.post(
-                    ajax_url,
-                    data=data,
-                    headers=headers,
-                    timeout=15
+                    ajax_url, data=data, headers=headers, timeout=10
                 ) as response:
-                    
                     if response.status == 200:
-                        response_text = await response.text()
-                        if response_text and response_text.strip():
-                            # Check if response contains video data
-                            if any(keyword in response_text.lower() for keyword in ['m3u8', 'http', 'file:', 'src:', '.mp4']):
-                                return response_text
-                            
-            except Exception as e:
-                continue  # Try next action
+                        text = await response.text()
+                        if text and text.strip():
+                            return text
+            except:
+                continue
         
         return None
     
-    # ==================== M3U8 EXTRACTION ====================
-    def extract_m3u8_from_response(self, response_text):
-        """Extract m3u8 URL from AJAX response"""
-        # Direct m3u8 URL patterns
-        m3u8_patterns = [
-            r'(https?://[^\s"\'\{\}<>]+\.m3u8[^\s"\'\{\}<>]*)',
-            r'["\'](//[^"\']+\.m3u8[^"\']*)["\']',
+    def extract_m3u8_from_ajax(self, response_text):
+        """Extract m3u8 from AJAX response"""
+        patterns = [
+            r'(https?://[^\s"\']+\.m3u8[^\s"\']*)',
+            r'["\'](//[^"\']+\.m3u8)["\']',
             r'file\s*[=:]\s*["\']([^"\']+\.m3u8)["\']',
-            r'src\s*[=:]\s*["\']([^"\']+\.m3u8)["\']',
-            r'url\s*[=:]\s*["\']([^"\']+\.m3u8)["\']',
-            r'video_url\s*[=:]\s*["\']([^"\']+\.m3u8)["\']',
         ]
         
-        for pattern in m3u8_patterns:
+        for pattern in patterns:
             matches = re.findall(pattern, response_text, re.IGNORECASE)
             for match in matches:
                 url = match if isinstance(match, str) else match[0]
-                if url and '.m3u8' in url.lower():
-                    return url.strip()
+                if url:
+                    return url
         
-        return None
-    
-    def extract_from_json(self, response_text):
-        """Extract m3u8 from JSON response"""
+        # Try JSON
         try:
-            # Try to parse as JSON
             data = json.loads(response_text)
-            
-            # Check common JSON structures
             if isinstance(data, dict):
-                # Direct file key
                 if data.get("file") and ".m3u8" in data["file"].lower():
                     return data["file"]
-                
-                # Sources array
-                if data.get("sources") and isinstance(data["sources"], list):
+                if data.get("sources"):
                     for source in data["sources"]:
                         if source.get("file") and ".m3u8" in source["file"].lower():
                             return source["file"]
-                        if source.get("src") and ".m3u8" in source["src"].lower():
-                            return source["src"]
-                
-                # Nested data
-                if data.get("data"):
-                    nested = data["data"]
-                    if isinstance(nested, str):
-                        # Try to extract from nested string
-                        m3u8_match = re.search(r'(https?://[^"\']+\.m3u8[^"\']*)', nested)
-                        if m3u8_match:
-                            return m3u8_match.group(1)
-                
-                # Player data
-                if data.get("player_data"):
-                    if isinstance(data["player_data"], str):
-                        m3u8_match = re.search(r'(https?://[^"\']+\.m3u8[^"\']*)', data["player_data"])
-                        if m3u8_match:
-                            return m3u8_match.group(1)
-        except json.JSONDecodeError:
-            pass
-        except Exception:
+        except:
             pass
         
         return None
     
     def fix_m3u8_url(self, m3u8_url):
-        """Fix relative or malformed m3u8 URLs"""
+        """Fix URL format"""
         if not m3u8_url:
             return m3u8_url
         
-        # Fix double slashes
-        m3u8_url = m3u8_url.replace('\\/', '/').replace('\\\\', '')
-        
-        # Add protocol if missing
         if m3u8_url.startswith('//'):
             m3u8_url = 'https:' + m3u8_url
         elif m3u8_url.startswith('/'):
             m3u8_url = 'https://' + self.base_domain + m3u8_url
-        elif not m3u8_url.startswith('http'):
-            # Try to construct full URL
-            m3u8_url = 'https://' + self.base_domain + '/' + m3u8_url.lstrip('/')
         
         return m3u8_url
     
     # ==================== EPISODE INFO ====================
     def extract_episode_info(self, soup):
-        """Extract episode title and info (for UI only)"""
+        """Extract episode title and info"""
         try:
-            # Multiple selectors for title
             title_selectors = [
-                'h1.entry-title',
-                'h1.title',
-                'h1',
-                '.episode-title',
-                '.video-title',
-                '.post-title',
-                'title'
+                'h1.entry-title', 'h1.title', 'h1',
+                '.episode-title', '.video-title', 'title'
             ]
             
             title = "Unknown Episode"
@@ -285,17 +368,12 @@ class WatchAnimeWorldScraper:
                     break
             
             # Clean title
-            title = re.sub(r'\s*\|\s*.*$', '', title)  # Remove after |
+            title = re.sub(r'\s*\|\s*.*$', '', title)
             title = re.sub(r'\s+', ' ', title).strip()
             
-            # Extract episode number
+            # Episode number
             episode_num = "01"
             ep_match = re.search(r'Episode\s*(\d+)', title, re.IGNORECASE)
-            if not ep_match:
-                ep_match = re.search(r'EP\s*(\d+)', title, re.IGNORECASE)
-            if not ep_match:
-                ep_match = re.search(r'#(\d+)', title)
-            
             if ep_match:
                 episode_num = ep_match.group(1).zfill(2)
             
@@ -315,15 +393,11 @@ class WatchAnimeWorldScraper:
             }
     
     def clean_filename(self, text):
-        """Create safe text for filename"""
+        """Create safe filename"""
         if not text:
             return "episode"
         
-        # Remove invalid characters
         text = re.sub(r'[<>:"/\\|?*]', '', text)
-        # Remove special characters but keep basic punctuation
         text = re.sub(r'[^\w\s\-.,!&]', '', text)
-        # Replace multiple spaces with single space
         text = re.sub(r'\s+', ' ', text)
-        # Trim and limit length
         return text.strip()[:80]
