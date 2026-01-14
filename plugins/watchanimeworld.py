@@ -17,293 +17,268 @@ class WatchAnimeWorldScraper:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.session.close()
     
+    # ==================== CORE FUNCTION ====================
     async def scrape_episode(self, url):
-        """Main scraping function - UPDATED for new structure"""
+        """Meido-style scraper: Episode URL -> AJAX -> m3u8"""
         try:
-            # Step 1: Fetch episode page with proper headers
-            headers = {
-                'User-Agent': USER_AGENT,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Referer': f'https://{self.base_domain}/',
-                'Upgrade-Insecure-Requests': '1',
-            }
-            
-            html = await fetch_url(self.session, url, headers)
+            # 1️⃣ Episode page fetch (for episode_id only)
+            html = await fetch_url(self.session, url)
             if not html:
                 return {"error": "Failed to fetch episode page"}
             
+            # 2️⃣ Extract episode_id (MOST IMPORTANT STEP)
+            episode_id = self.extract_episode_id(html)
+            if not episode_id:
+                # Fallback: try alternate method
+                episode_id = self.extract_id_from_url(url)
+                if not episode_id:
+                    return {"error": "Could not extract episode ID. Please check /debug"}
+            
+            # 3️⃣ Call WordPress AJAX endpoint (REAL SOURCE)
+            ajax_response = await self.fetch_player_ajax(episode_id, url)
+            if not ajax_response:
+                return {"error": "AJAX request failed. Player data not found."}
+            
+            # 4️⃣ Extract m3u8 from AJAX response
+            m3u8_url = self.extract_m3u8_from_response(ajax_response)
+            if not m3u8_url:
+                # Try alternative extraction methods
+                m3u8_url = self.extract_from_json(ajax_response)
+                if not m3u8_url:
+                    return {"error": "No m3u8 found in player data. Response: " + ajax_response[:200]}
+            
+            # 5️⃣ Validate and fix m3u8 URL
+            m3u8_url = self.fix_m3u8_url(m3u8_url)
+            
+            # 6️⃣ Episode info (for UI only, not for source)
             soup = BeautifulSoup(html, 'lxml')
+            episode_info = self.extract_episode_info(soup)
             
-            # Step 2: MULTIPLE METHODS to find video source
-            
-            # Method 1: Look for video player div with data-video-src
-            video_data = await self.extract_from_player_div(soup, url)
-            if video_data and "error" not in video_data:
-                return self.prepare_success_response(video_data, soup, url)
-            
-            # Method 2: Look for iframes (old method)
-            iframe_data = await self.extract_from_iframes(soup, url)
-            if iframe_data and "error" not in iframe_data:
-                return self.prepare_success_response(iframe_data, soup, url)
-            
-            # Method 3: Look for script variables
-            script_data = await self.extract_from_scripts(soup, url)
-            if script_data and "error" not in script_data:
-                return self.prepare_success_response(script_data, soup, url)
-            
-            # Method 4: Look for direct video sources
-            direct_data = await self.extract_direct_sources(soup, url)
-            if direct_data and "error" not in direct_data:
-                return self.prepare_success_response(direct_data, soup, url)
-            
-            # If all methods fail, try debug output
-            debug_info = await self.debug_page_structure(soup, url)
+            # ✅ SUCCESS: Return Meido-style response
             return {
-                "error": f"No video source found. Debug: {debug_info}",
-                "debug_html": html[:500] if len(html) > 500 else html
+                "success": True,
+                "episode_info": episode_info,
+                "player_data": {
+                    "type": "m3u8",
+                    "url": m3u8_url,
+                    "referer": url,
+                    "quality": "auto"
+                },
+                "source_url": url,
+                "debug": {
+                    "episode_id": episode_id,
+                    "ajax_response_preview": ajax_response[:300] if ajax_response else "None"
+                }
             }
             
         except Exception as e:
             return {"error": f"Scraping failed: {str(e)}"}
     
-    async def extract_from_player_div(self, soup, referer_url):
-        """Extract from player container with data attributes"""
-        try:
-            # Look for video player container
-            player_div = soup.find('div', {'id': 'load_player'})
-            if not player_div:
-                player_div = soup.find('div', {'class': 'player'})
-            if not player_div:
-                player_div = soup.find('div', {'class': 'video-player'})
+    # ==================== ID EXTRACTION ====================
+    def extract_episode_id(self, html):
+        """Extract episode/post ID from HTML (Meido's first step)"""
+        patterns = [
+            # WordPress post ID (most common)
+            r'data-post=["\'](\d+)["\']',
+            r'data-id=["\'](\d+)["\']',
+            r'post["\']?\s*:\s*["\']?(\d+)',
             
-            if player_div:
-                # Check for data attributes
-                if player_div.get('data-video-src'):
-                    video_url = player_div['data-video-src']
-                    return await self.process_video_url(video_url, referer_url)
-                
-                # Check for embedded script
-                script_tag = player_div.find('script')
-                if script_tag and script_tag.string:
-                    return await self.parse_player_script(script_tag.string, referer_url)
+            # JS variables
+            r'episode_id\s*[=:]\s*["\']?(\d+)["\']?',
+            r'post_id\s*[=:]\s*["\']?(\d+)["\']?',
+            r'id\s*[=:]\s*["\']?(\d+)["\']?',
+            r'episode["\']?\s*:\s*["\']?(\d+)',
             
-            return {"error": "No player div found"}
-        except Exception as e:
-            return {"error": f"Player div extraction failed: {str(e)}"}
+            # Hidden inputs
+            r'<input[^>]*name=["\']episode_id["\'][^>]*value=["\'](\d+)["\']',
+            r'<input[^>]*name=["\']post_id["\'][^>]*value=["\'](\d+)["\']',
+            
+            # URL patterns in scripts
+            r'ajax\.php\?.*?id=(\d+)',
+            
+            # WordPress nonce patterns (sometimes contains ID)
+            r'ajax_nonce["\']?\s*:\s*["\'][^"\']*-(\d+)["\']',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, html, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        
+        return None
     
-    async def extract_from_iframes(self, soup, referer_url):
-        """Extract from iframes"""
-        try:
-            iframes = soup.find_all('iframe')
-            
-            for iframe in iframes:
-                src = iframe.get('src')
-                if src:
-                    # Clean URL
-                    if src.startswith('//'):
-                        src = f"https:{src}"
-                    elif src.startswith('/'):
-                        src = f"https://{self.base_domain}{src}"
+    def extract_id_from_url(self, url):
+        """Extract ID from URL (fallback method)"""
+        patterns = [
+            r'episode/[^/]+-(\d+)x\d+/',  # gachiakuta-1x1/
+            r'episode/(\d+)/',
+            r'watch/(\d+)/',
+            r'\?p=(\d+)',
+            r'&id=(\d+)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, url, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return None
+    
+    # ==================== AJAX REQUEST ====================
+    async def fetch_player_ajax(self, episode_id, referer_url):
+        """Call WordPress admin-ajax.php (REAL SOURCE)"""
+        ajax_url = f"https://{self.base_domain}/wp-admin/admin-ajax.php"
+        
+        # Common WordPress player actions (trying multiple)
+        possible_actions = [
+            "player_ajax",
+            "get_player",
+            "load_player",
+            "episode_player",
+            "anime_player",
+            "watchanimeworld_player",
+            "get_video",
+            "load_video",
+            "wp_ajax_player",
+            "wp_ajax_get_player"
+        ]
+        
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Referer": referer_url,
+            "X-Requested-With": "XMLHttpRequest",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Origin": f"https://{self.base_domain}"
+        }
+        
+        for action in possible_actions:
+            try:
+                data = {
+                    "action": action,
+                    "episode_id": episode_id,
+                    "post_id": episode_id,  # Sometimes it's post_id
+                    "id": episode_id,       # Sometimes just id
+                }
+                
+                async with self.session.post(
+                    ajax_url,
+                    data=data,
+                    headers=headers,
+                    timeout=15
+                ) as response:
                     
-                    # Check if it's a video iframe
-                    if any(keyword in src.lower() for keyword in ['video', 'player', 'stream', 'embed']):
-                        # Fetch iframe content
-                        iframe_headers = {
-                            'User-Agent': USER_AGENT,
-                            'Referer': referer_url
-                        }
-                        
-                        iframe_html = await fetch_url(self.session, src, iframe_headers)
-                        if iframe_html:
-                            iframe_soup = BeautifulSoup(iframe_html, 'lxml')
+                    if response.status == 200:
+                        response_text = await response.text()
+                        if response_text and response_text.strip():
+                            # Check if response contains video data
+                            if any(keyword in response_text.lower() for keyword in ['m3u8', 'http', 'file:', 'src:', '.mp4']):
+                                return response_text
                             
-                            # Look for video sources in iframe
-                            source_tags = iframe_soup.find_all('source')
-                            for source in source_tags:
-                                src_url = source.get('src')
-                                if src_url:
-                                    result = await self.process_video_url(src_url, src)
-                                    if "error" not in result:
-                                        return result
-                            
-                            # Look for m3u8 in iframe scripts
-                            scripts = iframe_soup.find_all('script')
-                            for script in scripts:
-                                if script.string:
-                                    m3u8_match = re.search(r'["\'](https?://[^"\']+\.m3u8[^"\']*)["\']', script.string)
-                                    if m3u8_match:
-                                        m3u8_url = m3u8_match.group(1)
-                                        return {
-                                            "type": "m3u8",
-                                            "url": m3u8_url,
-                                            "referer": src,
-                                            "quality": "auto"
-                                        }
-            
-            return {"error": "No video iframes found"}
-        except Exception as e:
-            return {"error": f"Iframe extraction failed: {str(e)}"}
+            except Exception as e:
+                continue  # Try next action
+        
+        return None
     
-    async def extract_from_scripts(self, soup, referer_url):
-        """Extract video URLs from JavaScript variables"""
+    # ==================== M3U8 EXTRACTION ====================
+    def extract_m3u8_from_response(self, response_text):
+        """Extract m3u8 URL from AJAX response"""
+        # Direct m3u8 URL patterns
+        m3u8_patterns = [
+            r'(https?://[^\s"\'\{\}<>]+\.m3u8[^\s"\'\{\}<>]*)',
+            r'["\'](//[^"\']+\.m3u8[^"\']*)["\']',
+            r'file\s*[=:]\s*["\']([^"\']+\.m3u8)["\']',
+            r'src\s*[=:]\s*["\']([^"\']+\.m3u8)["\']',
+            r'url\s*[=:]\s*["\']([^"\']+\.m3u8)["\']',
+            r'video_url\s*[=:]\s*["\']([^"\']+\.m3u8)["\']',
+        ]
+        
+        for pattern in m3u8_patterns:
+            matches = re.findall(pattern, response_text, re.IGNORECASE)
+            for match in matches:
+                url = match if isinstance(match, str) else match[0]
+                if url and '.m3u8' in url.lower():
+                    return url.strip()
+        
+        return None
+    
+    def extract_from_json(self, response_text):
+        """Extract m3u8 from JSON response"""
         try:
-            scripts = soup.find_all('script')
+            # Try to parse as JSON
+            data = json.loads(response_text)
             
-            for script in scripts:
-                if not script.string:
-                    continue
+            # Check common JSON structures
+            if isinstance(data, dict):
+                # Direct file key
+                if data.get("file") and ".m3u8" in data["file"].lower():
+                    return data["file"]
                 
-                script_text = script.string
+                # Sources array
+                if data.get("sources") and isinstance(data["sources"], list):
+                    for source in data["sources"]:
+                        if source.get("file") and ".m3u8" in source["file"].lower():
+                            return source["file"]
+                        if source.get("src") and ".m3u8" in source["src"].lower():
+                            return source["src"]
                 
-                # Pattern 1: Look for video URL variables
-                patterns = [
-                    r'video_url\s*[=:]\s*["\'](https?://[^"\']+)["\']',
-                    r'videoUrl\s*[=:]\s*["\'](https?://[^"\']+)["\']',
-                    r'src\s*[=:]\s*["\'](https?://[^"\']+)["\']',
-                    r'file\s*[=:]\s*["\'](https?://[^"\']+)["\']',
-                    r'["\'](https?://[^"\']+\.(?:m3u8|mp4|mkv|webm)[^"\']*)["\']'
-                ]
+                # Nested data
+                if data.get("data"):
+                    nested = data["data"]
+                    if isinstance(nested, str):
+                        # Try to extract from nested string
+                        m3u8_match = re.search(r'(https?://[^"\']+\.m3u8[^"\']*)', nested)
+                        if m3u8_match:
+                            return m3u8_match.group(1)
                 
-                for pattern in patterns:
-                    matches = re.findall(pattern, script_text, re.IGNORECASE)
-                    for match in matches:
-                        if isinstance(match, tuple):
-                            match = match[0]
-                        
-                        if any(ext in match.lower() for ext in ['.m3u8', '.mp4', '.mkv', '.webm']):
-                            return await self.process_video_url(match, referer_url)
-            
-            return {"error": "No video URLs in scripts"}
-        except Exception as e:
-            return {"error": f"Script extraction failed: {str(e)}"}
+                # Player data
+                if data.get("player_data"):
+                    if isinstance(data["player_data"], str):
+                        m3u8_match = re.search(r'(https?://[^"\']+\.m3u8[^"\']*)', data["player_data"])
+                        if m3u8_match:
+                            return m3u8_match.group(1)
+        except json.JSONDecodeError:
+            pass
+        except Exception:
+            pass
+        
+        return None
     
-    async def extract_direct_sources(self, soup, referer_url):
-        """Extract direct video source tags"""
-        try:
-            # Look for video tags
-            video_tags = soup.find_all('video')
-            for video in video_tags:
-                # Check source tags inside video
-                source_tags = video.find_all('source')
-                for source in source_tags:
-                    src = source.get('src')
-                    if src:
-                        return await self.process_video_url(src, referer_url)
-                
-                # Check src attribute directly on video tag
-                if video.get('src'):
-                    return await self.process_video_url(video['src'], referer_url)
-            
-            return {"error": "No direct video sources"}
-        except Exception as e:
-            return {"error": f"Direct source extraction failed: {str(e)}"}
+    def fix_m3u8_url(self, m3u8_url):
+        """Fix relative or malformed m3u8 URLs"""
+        if not m3u8_url:
+            return m3u8_url
+        
+        # Fix double slashes
+        m3u8_url = m3u8_url.replace('\\/', '/').replace('\\\\', '')
+        
+        # Add protocol if missing
+        if m3u8_url.startswith('//'):
+            m3u8_url = 'https:' + m3u8_url
+        elif m3u8_url.startswith('/'):
+            m3u8_url = 'https://' + self.base_domain + m3u8_url
+        elif not m3u8_url.startswith('http'):
+            # Try to construct full URL
+            m3u8_url = 'https://' + self.base_domain + '/' + m3u8_url.lstrip('/')
+        
+        return m3u8_url
     
-    async def process_video_url(self, video_url, referer_url):
-        """Process and validate video URL"""
-        try:
-            # Clean URL
-            if video_url.startswith('//'):
-                video_url = f"https:{video_url}"
-            elif video_url.startswith('/'):
-                video_url = f"https://{self.base_domain}{video_url}"
-            
-            # Determine type
-            if '.m3u8' in video_url.lower():
-                video_type = "m3u8"
-            elif '.mp4' in video_url.lower():
-                video_type = "mp4"
-            elif any(ext in video_url.lower() for ext in ['.mkv', '.webm', '.avi']):
-                video_type = "direct"
-            else:
-                # Try to detect by checking headers
-                try:
-                    headers = {'User-Agent': USER_AGENT, 'Referer': referer_url}
-                    async with self.session.head(video_url, headers=headers, timeout=5) as resp:
-                        content_type = resp.headers.get('Content-Type', '')
-                        if 'application/vnd.apple.mpegurl' in content_type or 'mpegurl' in content_type:
-                            video_type = "m3u8"
-                        elif 'video/mp4' in content_type:
-                            video_type = "mp4"
-                        else:
-                            video_type = "unknown"
-                except:
-                    video_type = "unknown"
-            
-            return {
-                "type": video_type,
-                "url": video_url,
-                "referer": referer_url,
-                "quality": "auto"
-            }
-            
-        except Exception as e:
-            return {"error": f"URL processing failed: {str(e)}"}
-    
-    async def parse_player_script(self, script_text, referer_url):
-        """Parse player JavaScript for video data"""
-        try:
-            # Look for JSON-like structures
-            json_patterns = [
-                r'(\{.*?"sources".*?\})',
-                r'(\{.*?"file".*?\})',
-                r'(\{.*?"src".*?\})'
-            ]
-            
-            for pattern in json_patterns:
-                matches = re.findall(pattern, script_text, re.DOTALL)
-                for match in matches:
-                    try:
-                        data = json.loads(match)
-                        
-                        # Check for sources array
-                        if 'sources' in data and isinstance(data['sources'], list):
-                            for source in data['sources']:
-                                if 'file' in source:
-                                    return await self.process_video_url(source['file'], referer_url)
-                        
-                        # Check for direct file
-                        if 'file' in data:
-                            return await self.process_video_url(data['file'], referer_url)
-                        if 'src' in data:
-                            return await self.process_video_url(data['src'], referer_url)
-                            
-                    except json.JSONDecodeError:
-                        continue
-            
-            # Look for JW Player setup
-            if 'jwplayer(' in script_text:
-                # Extract setup data
-                setup_match = re.search(r'jwplayer\([^)]+\)\.setup\((\{.*?\})\);', script_text, re.DOTALL)
-                if setup_match:
-                    try:
-                        setup_data = json.loads(setup_match.group(1))
-                        if 'sources' in setup_data:
-                            for source in setup_data['sources']:
-                                if 'file' in source:
-                                    return await self.process_video_url(source['file'], referer_url)
-                    except:
-                        pass
-            
-            return {"error": "Could not parse player script"}
-        except Exception as e:
-            return {"error": f"Script parsing failed: {str(e)}"}
-    
+    # ==================== EPISODE INFO ====================
     def extract_episode_info(self, soup):
-        """Extract episode title and information"""
+        """Extract episode title and info (for UI only)"""
         try:
-            # Try multiple selectors for title
-            selectors = [
+            # Multiple selectors for title
+            title_selectors = [
                 'h1.entry-title',
                 'h1.title',
                 'h1',
                 '.episode-title',
                 '.video-title',
+                '.post-title',
                 'title'
             ]
             
             title = "Unknown Episode"
-            for selector in selectors:
+            for selector in title_selectors:
                 element = soup.select_one(selector)
                 if element and element.text.strip():
                     title = element.text.strip()
@@ -313,15 +288,23 @@ class WatchAnimeWorldScraper:
             title = re.sub(r'\s*\|\s*.*$', '', title)  # Remove after |
             title = re.sub(r'\s+', ' ', title).strip()
             
-            # Try to extract episode number
+            # Extract episode number
             episode_num = "01"
             ep_match = re.search(r'Episode\s*(\d+)', title, re.IGNORECASE)
+            if not ep_match:
+                ep_match = re.search(r'EP\s*(\d+)', title, re.IGNORECASE)
+            if not ep_match:
+                ep_match = re.search(r'#(\d+)', title)
+            
             if ep_match:
                 episode_num = ep_match.group(1).zfill(2)
             
+            # Clean filename
+            cleaned = self.clean_filename(title)
+            
             return {
                 "title": title,
-                "cleaned_title": self.clean_filename(title),
+                "cleaned_title": cleaned,
                 "episode_number": episode_num
             }
         except:
@@ -331,51 +314,16 @@ class WatchAnimeWorldScraper:
                 "episode_number": "01"
             }
     
-    async def debug_page_structure(self, soup, url):
-        """Debug function to see page structure"""
-        try:
-            debug_info = []
-            
-            # Count elements
-            debug_info.append(f"Iframes: {len(soup.find_all('iframe'))}")
-            debug_info.append(f"Video tags: {len(soup.find_all('video'))}")
-            debug_info.append(f"Scripts: {len(soup.find_all('script'))}")
-            
-            # Check for common player divs
-            player_divs = []
-            for div in soup.find_all('div', {'class': True}):
-                if any(keyword in div['class'] for keyword in ['player', 'video', 'stream']):
-                    player_divs.append(div['class'])
-            
-            debug_info.append(f"Player divs: {len(player_divs)}")
-            
-            # Check meta tags
-            meta_refresh = soup.find('meta', {'http-equiv': 'refresh'})
-            if meta_refresh:
-                debug_info.append("Has meta refresh")
-            
-            return "; ".join(debug_info)
-        except:
-            return "Debug failed"
-    
     def clean_filename(self, text):
-        """Clean text for filename"""
+        """Create safe text for filename"""
+        if not text:
+            return "episode"
+        
         # Remove invalid characters
         text = re.sub(r'[<>:"/\\|?*]', '', text)
-        # Remove special characters
-        text = re.sub(r'[^\w\s\-.,!]', '', text)
-        # Replace multiple spaces
+        # Remove special characters but keep basic punctuation
+        text = re.sub(r'[^\w\s\-.,!&]', '', text)
+        # Replace multiple spaces with single space
         text = re.sub(r'\s+', ' ', text)
-        # Trim
-        return text.strip()[:100]  # Limit length
-    
-    def prepare_success_response(self, video_data, soup, url):
-        """Prepare success response"""
-        episode_info = self.extract_episode_info(soup)
-        
-        return {
-            "success": True,
-            "episode_info": episode_info,
-            "player_data": video_data,
-            "source_url": url
-        }
+        # Trim and limit length
+        return text.strip()[:80]
