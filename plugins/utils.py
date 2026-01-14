@@ -22,13 +22,13 @@ def sanitize_filename(filename):
     return re.sub(r'[<>:"/\\|?*]', '', filename)
 
 async def fetch_url(session, url, headers=None):
-    """Async URL fetcher with better headers"""
+    """Async URL fetcher with better error handling"""
     if headers is None:
         headers = {}
 
-    # Comprehensive headers for bypassing restrictions
+    # Default headers that work with most sites
     default_headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
         'Accept-Encoding': 'gzip, deflate, br',
@@ -37,41 +37,54 @@ async def fetch_url(session, url, headers=None):
         'Sec-Fetch-Dest': 'document',
         'Sec-Fetch-Mode': 'navigate',
         'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
         'Cache-Control': 'max-age=0',
         'DNT': '1',
-        'Sec-Ch-Ua': '"Not A(Brand";v="8", "Chromium";v="132"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"',
     }
     
-    # Merge provided headers with defaults
+    # Merge headers
     merged_headers = {**default_headers, **headers}
     
-    # Add Referer if not present and if it's a player page
-    if 'referer' not in merged_headers and 'zephyrflick' in url.lower():
+    # Add Referer if missing for cross-domain requests
+    if 'Referer' not in merged_headers and 'watchanimeworld' not in url:
         merged_headers['Referer'] = 'https://watchanimeworld.net/'
     
     for attempt in range(3):
         try:
-            async with session.get(url, headers=merged_headers, timeout=15) as response:
+            # DEBUG: Print request info
+            print(f"DEBUG: Fetching {url} (attempt {attempt + 1})")
+            
+            async with session.get(url, headers=merged_headers, timeout=TIMEOUT) as response:
+                print(f"DEBUG: Response status: {response.status}")
+                
                 if response.status == 200:
-                    return await response.text()
+                    content = await response.text()
+                    print(f"DEBUG: Received {len(content)} bytes")
+                    return content
                 elif response.status in [403, 429]:
-                    # Rate limiting or forbidden - wait and retry
+                    # Forbidden or rate limited
+                    print(f"DEBUG: Status {response.status}, waiting...")
                     await asyncio.sleep(2)
-                    continue
-                else:
-                    # Try with different User-Agent
+                    
+                    # Try different User-Agent
                     merged_headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                     continue
-        except Exception as e:
+                else:
+                    print(f"DEBUG: Unexpected status {response.status}")
+                    continue
+                    
+        except asyncio.TimeoutError:
+            print(f"DEBUG: Timeout on attempt {attempt + 1}")
             if attempt == 2:
-                raise e
+                raise
+            await asyncio.sleep(1)
+        except Exception as e:
+            print(f"DEBUG: Error on attempt {attempt + 1}: {str(e)}")
+            if attempt == 2:
+                raise
             await asyncio.sleep(1)
     
+    print(f"DEBUG: All attempts failed for {url}")
     return None
-    
 
 def get_temp_path(filename):
     """Get path in temp directory"""
@@ -82,7 +95,6 @@ def cleanup_temp(file_path):
     try:
         if os.path.exists(file_path):
             os.remove(file_path)
-    except:
-        pass
-
-
+            print(f"DEBUG: Cleaned up {file_path}")
+    except Exception as e:
+        print(f"DEBUG: Failed to cleanup {file_path}: {str(e)}")
