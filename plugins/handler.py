@@ -2,14 +2,14 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 import re
 import json
+import aiohttp
+from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from plugins.utils import is_valid_url, extract_domain
 from database import db
-
-from pyrogram import Client, filters
-from pyrogram.types import Message
 from plugins.debug import debug_url
 import asyncio
+
 
 @Client.on_message(filters.command("test_zephyr") & filters.private)
 async def test_zephyr_command(client, message: Message):
@@ -176,4 +176,5 @@ async def link_handler(client, message: Message):
     # Add to queue
     from plugins.queue import add_to_queue
     await add_to_queue(client, message, url)
+
 
