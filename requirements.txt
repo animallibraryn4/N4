@@ -1,19 +1,9 @@
-# --- For-Bot-Working --------- #
-pyrofork
-TgCrypto
-pyromod==1.5
-python-dotenv
-# --- For-Database ------------ #
-pymongo
-motor
-umongo
-marshmallow
-dnspython
-# --- For-Web-Response ------- #
-pytz
-requests
-bs4
-shortzy
-aiohttp
-aiofiles
-asyncio
+pyrogram==2.0.106
+tgcrypto==1.2.5
+aiohttp==3.9.1
+beautifulsoup4==4.12.2
+lxml==4.9.4
+ffmpeg-python==0.2.0
+python-dotenv==1.0.0
+aiofiles==23.2.1
+requests==2.31.0
