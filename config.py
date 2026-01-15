@@ -11,9 +11,9 @@ class Config:
     
     # Telegram Configuration - FROM ENVIRONMENT VARIABLES
     API_ID = int(os.getenv("API_ID", 22299340))
-    API_HASH = os.getenv("API_HASH", "")
-    MAIN_BOT_TOKEN = os.getenv("MAIN_BOT_TOKEN", "")
-    CLIENT_BOT_TOKEN = os.getenv("CLIENT_BOT_TOKEN", "")
+    API_HASH = os.getenv("API_HASH", "09b09f3e2ff1306da4a19888f614d937")
+    MAIN_BOT_TOKEN = os.getenv("MAIN_BOT_TOKEN", "7906213903:AAEvUmwjmwTHC9NtayJ2NLbYsROQdaOeZR0")
+    CLIENT_BOT_TOKEN = os.getenv("CLIENT_BOT_TOKEN", "7765824536:AAFxnM5qftx3LWjLjxKsnXeuLf3XMXo950o")
     
     # Chat IDs
     OWNER_IDS = ["5380609667"]
@@ -68,3 +68,4 @@ class Config:
             raise ValueError(f"Missing required configuration: {', '.join(missing)}")
 
 config = Config()
+
