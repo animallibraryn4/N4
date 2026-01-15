@@ -1,3 +1,5 @@
+# Add missing import at the top
+import os
 import asyncio
 import logging
 import threading
@@ -7,13 +9,37 @@ from config import config
 from database import db
 from plugins.anime_handler import AnimeHandler
 
+# Fix the system dependency check
+def check_dependencies():
+    """Check and install required system dependencies"""
+    print("Checking system dependencies...")
+    
+    # Check for mkvtoolnix
+    if os.system("mkvmerge --version") != 0:
+        print("mkvtoolnix not found! Please install it using:")
+        print("sudo apt install mkvtoolnix")
+        print("Or: sudo apt install mkvtoolnix -y")
+        return False
+    
+    # Check for ffmpeg
+    if os.system("ffmpeg -version") != 0:
+        print("ffmpeg not found! Please install it using:")
+        print("sudo apt install ffmpeg -y")
+        return False
+    
+    print("All system dependencies are available.")
+    return True
 
-#Ye check karega ki mkvmerge installed hai ya nahi
-if os.system("mkvmerge --version") != 0:
-    print("mkvtoolnix nahi mila, install kar raha hoon...")
-    os.system("apt-get update && apt-get install python3-libtorrent")
-else:
-    print("libtorrent pehle se installed hai.")
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(config.LOG_FILE)
+    ]
+)
+logger = logging.getLogger('AutoAnimeBot')
 
 # Setup logging
 logging.basicConfig(
@@ -161,4 +187,5 @@ if __name__ == "__main__":
     
     # Run the bot
     asyncio.run(main())
+
 
