@@ -1,15 +1,16 @@
-from pymongo import MongoClient, ServerApi
+from pymongo import MongoClient, server_api
 from typing import Optional, List, Dict, Any
 from config import config
 import logging
 
 logger = logging.getLogger(__name__)
 
+
 class Database:
     def __init__(self):
         self.client = MongoClient(
             config.DATABASE_URL,
-            server_api=ServerApi('1')
+            server_api=server_api.ServerApi('1') # Update this line
         )
         self.db = self.client[config.DATABASE_NAME]
         
