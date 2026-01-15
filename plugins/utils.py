@@ -1,109 +1,187 @@
+"""
+Utility functions for AutoAnimeBot
+Licensed under GNU General Public License v3.0
+"""
+
 import re
-import os
-import aiohttp
-import asyncio
-from urllib.parse import urlparse
-from config import USER_AGENT, TIMEOUT, TEMP_DIR
+import random
+import string
+import requests
+import subprocess
+import logging
+from typing import Optional, Dict
 
-def is_valid_url(url):
-    """Check if URL is valid"""
-    try:
-        result = urlparse(url)
-        return all([result.scheme, result.netloc])
-    except:
-        return False
+logger = logging.getLogger(__name__)
 
-def extract_domain(url):
-    """Extract domain from URL"""
-    return urlparse(url).netloc
-
-def sanitize_filename(filename):
-    """Remove invalid characters from filename"""
-    return re.sub(r'[<>:"/\\|?*]', '', filename)
-
-async def fetch_url(session, url, headers=None):
-    """Async URL fetcher with anti-bot bypass"""
-    if headers is None:
-        headers = {}
-
-    # Advanced headers that mimic real browser
-    default_headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Cache-Control': 'max-age=0',
-        'DNT': '1',
-        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Microsoft Edge";v="120"',
-        'Sec-Ch-Ua-Mobile': '?0',
-        'Sec-Ch-Ua-Platform': '"Windows"',
+# AniList GraphQL query
+ANIME_QUERY = '''
+query ($search: String) { 
+    Media (type: ANIME, search: $search) { 
+        title {
+            english
+            romaji
+        }
+        status
+        coverImage {
+            extraLarge
+        }
     }
-    
-    # Merge headers
-    merged_headers = {**default_headers, **headers}
-    
-    # Rotate User-Agents
-    user_agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
-    ]
-    
-    for attempt in range(3):
-        try:
-            # Rotate User-Agent
-            merged_headers['User-Agent'] = user_agents[attempt % len(user_agents)]
-            
-            print(f"DEBUG: Fetching {url} with User-Agent: {merged_headers['User-Agent'][:50]}...")
-            
-            async with session.get(url, headers=merged_headers, timeout=15) as response:
-                print(f"DEBUG: Response status: {response.status}")
-                
-                if response.status == 200:
-                    content = await response.text()
-                    print(f"DEBUG: Success - {len(content)} bytes")
-                    return content
-                elif response.status in [403, 429]:
-                    # Anti-bot detection
-                    print(f"DEBUG: Blocked with status {response.status}")
-                    await asyncio.sleep(3)  # Wait longer
-                    continue
-                else:
-                    print(f"DEBUG: Unexpected status {response.status}")
-                    await asyncio.sleep(1)
-                    
-        except asyncio.TimeoutError:
-            print(f"DEBUG: Timeout on attempt {attempt + 1}")
-            if attempt == 2:
-                raise
-            await asyncio.sleep(2)
-        except Exception as e:
-            print(f"DEBUG: Error on attempt {attempt + 1}: {str(e)}")
-            if attempt == 2:
-                raise
-            await asyncio.sleep(1)
-    
-    print(f"DEBUG: All attempts failed for {url}")
-    return None
-    
+}
+'''
 
-def get_temp_path(filename):
-    """Get path in temp directory"""
-    return os.path.join(TEMP_DIR, filename)
+def extract_anime_info(title: str) -> Optional[Dict]:
+    """
+    Extract information from anime title
+    
+    Args:
+        title: Anime title string
+        
+    Returns:
+        Dictionary with extracted info or None
+    """
+    # Pattern for [SubsPlease] Anime Name - Episode (Quality) [Release Info]
+    pattern = r"\[SubsPlease\] (.+?)(?: S(\d+))? - (\d+)(?: \((\d+p)\) \[.+?\])?"
+    
+    match = re.match(pattern, title)
+    if not match:
+        logger.warning(f"Could not parse title: {title}")
+        return None
+    
+    # Extract groups
+    anime_name = match.group(1)
+    season = match.group(2)
+    episode = match.group(3)
+    quality = match.group(4)
+    
+    # Build display name
+    if season:
+        display_name = f"{anime_name} Season {season}"
+        search_query = f"{anime_name} Season {season}"
+    else:
+        display_name = anime_name
+        search_query = anime_name
+    
+    return {
+        "display_name": display_name,
+        "search_query": search_query,
+        "episode": episode,
+        "season": season,
+        "quality": quality,
+        "original_title": title
+    }
 
-def cleanup_temp(file_path):
-    """Cleanup temporary file"""
+def get_anime_details(anime_name: str) -> Dict:
+    """
+    Get anime details from AniList API
+    
+    Args:
+        anime_name: Name of anime to search
+        
+    Returns:
+        Dictionary with anime details
+    """
     try:
-        if os.path.exists(file_path):
-            os.remove(file_path)
-            print(f"DEBUG: Cleaned up {file_path}")
+        variables = {'search': anime_name}
+        response = requests.post(
+            'https://graphql.anilist.co',
+            json={'query': ANIME_QUERY, 'variables': variables}
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            media = data.get('data', {}).get('Media', {})
+            
+            return {
+                "name": media.get('title', {}).get('english') or 
+                       media.get('title', {}).get('romaji') or anime_name,
+                "status": media.get('status', 'Unknown'),
+                "image": media.get('coverImage', {}).get('extraLarge')
+            }
+        else:
+            logger.error(f"AniList API error: {response.status_code}")
+    
     except Exception as e:
-        print(f"DEBUG: Failed to cleanup {file_path}: {str(e)}")
+        logger.error(f"Error fetching anime details: {e}")
+    
+    # Return default values on error
+    return {
+        "name": anime_name,
+        "status": "Unknown",
+        "image": None
+    }
 
+def generate_random_hash(length: int = 20) -> str:
+    """
+    Generate a random hash string
+    
+    Args:
+        length: Length of hash
+        
+    Returns:
+        Random hash string
+    """
+    characters = string.ascii_letters + string.digits
+    return ''.join(random.choice(characters) for _ in range(length))
+
+def encode_video_file(input_path: str) -> Optional[str]:
+    """
+    Encode video file to compressed format
+    
+    Args:
+        input_path: Path to input video file
+        
+    Returns:
+        Path to encoded file or None if failed
+    """
+    try:
+        # Extract filename without extension
+        base_name = os.path.splitext(os.path.basename(input_path))[0]
+        output_path = f"./downloads/{base_name}_encoded.mp4"
+        
+        # Extract subtitles
+        subprocess.run([
+            "ffmpeg", "-i", input_path,
+            "-c:s", "srt", "subtitles.srt"
+        ], capture_output=True)
+        
+        # Encode video
+        command = [
+            "ffmpeg", "-i", input_path,
+            "-i", "subtitles.srt" if os.path.exists("subtitles.srt") else None,
+            "-c:v", "libx264",
+            "-b:v", "700k",
+            "-c:a", "aac",
+            "-c:s", "mov_text",
+            output_path
+        ]
+        
+        # Remove None values
+        command = [c for c in command if c is not None]
+        
+        result = subprocess.run(command, capture_output=True)
+        
+        # Clean up subtitle file
+        if os.path.exists("subtitles.srt"):
+            os.remove("subtitles.srt")
+        
+        if result.returncode == 0:
+            logger.info(f"Video encoded successfully: {output_path}")
+            return output_path
+        else:
+            logger.error(f"Encoding failed: {result.stderr}")
+            return None
+    
+    except Exception as e:
+        logger.error(f"Error encoding video: {e}")
+        return None
+
+def progress_callback(current: int, total: int):
+    """
+    Progress callback for uploads/downloads
+    
+    Args:
+        current: Current bytes transferred
+        total: Total bytes to transfer
+    """
+    percentage = (current / total) * 100
+    logger.debug(f"Progress: {percentage:.1f}%")
