@@ -1,114 +1,138 @@
-import sqlite3
-import json
-import time
-import os
-from datetime import datetime
+from pymongo import MongoClient, ServerApi
+from typing import Optional, List, Dict, Any
+from config import config
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self):
-        self.conn = sqlite3.connect('anime_bot.db')
-        self.create_tables()
-    
-    def create_tables(self):
-        cursor = self.conn.cursor()
-        
-        # Users table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            username TEXT,
-            first_name TEXT,
-            last_name TEXT,
-            join_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            total_requests INTEGER DEFAULT 0
+        self.client = MongoClient(
+            config.DATABASE_URL,
+            server_api=ServerApi('1')
         )
-        ''')
+        self.db = self.client[config.DATABASE_NAME]
         
-        # Queue table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            url TEXT,
-            status TEXT DEFAULT 'pending',
-            added_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            start_time TIMESTAMP,
-            end_time TIMESTAMP,
-            file_path TEXT
+        # Collections
+        self.last_added = self.db['last_added']
+        self.new_db = self.db['new_db']
+        self.remain = self.db['remain']
+        self.worker = self.db['worker']
+        self.files = self.db['files']
+        
+        self._initialize_collections()
+    
+    def _initialize_collections(self):
+        """Initialize collections with default documents if needed"""
+        # Ensure worker collection has a document
+        if not self.worker.find_one({"_id": 1}):
+            self.worker.insert_one({"_id": 1, "working": False})
+        
+        # Ensure last_added collection has a document
+        if not self.last_added.find_one({"_id": 1}):
+            self.last_added.insert_one({"_id": 1, "hash": None})
+    
+    def get_last_hash(self) -> Optional[str]:
+        """Get the last processed hash from RSS feed"""
+        data = self.last_added.find_one({"_id": 1})
+        return data.get("hash") if data else None
+    
+    def update_last_hash(self, hash_value: str) -> None:
+        """Update the last processed hash"""
+        self.last_added.update_one(
+            {"_id": 1},
+            {"$set": {"hash": hash_value}},
+            upsert=True
         )
-        ''')
+    
+    def is_new_database(self) -> bool:
+        """Check if this is a fresh database"""
+        return self.new_db.find_one({"_id": 1}) is None
+    
+    def mark_database_initialized(self) -> None:
+        """Mark database as initialized"""
+        self.new_db.insert_one({"_id": 1})
+    
+    def add_remaining_anime(self, anime_list: List[Dict]) -> None:
+        """Add anime to remaining queue"""
+        current_data = self.remain.find_one({"_id": 1})
         
-        # Logs table
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            user_id INTEGER,
-            action TEXT,
-            details TEXT
+        if not current_data:
+            self.remain.insert_one({"_id": 1, "list": anime_list})
+        else:
+            current_list = current_data["list"]
+            current_list.extend(anime_list)
+            self.remain.update_one(
+                {"_id": 1},
+                {"$set": {"list": current_list}},
+                upsert=True
+            )
+    
+    def get_remaining_anime(self) -> List[Dict]:
+        """Get list of remaining anime to process"""
+        data = self.remain.find_one({"_id": 1})
+        return data.get("list", []) if data else []
+    
+    def update_remaining_anime(self, anime_list: List[Dict]) -> None:
+        """Update the remaining anime list"""
+        self.remain.update_one(
+            {"_id": 1},
+            {"$set": {"list": anime_list}},
+            upsert=True
         )
-        ''')
+    
+    def is_worker_busy(self) -> bool:
+        """Check if worker is currently processing"""
+        data = self.worker.find_one({"_id": 1})
+        return data.get("working", False) if data else False
+    
+    def set_worker_status(self, busy: bool) -> None:
+        """Set worker status"""
+        self.worker.update_one(
+            {"_id": 1},
+            {"$set": {"working": busy}},
+            upsert=True
+        )
+    
+    def add_file_record(self, name: str, file_hash: str, message_id: int) -> None:
+        """Add file record to database"""
+        self.files.insert_one({
+            "name": name,
+            "hash": file_hash,
+            "message_id": message_id
+        })
+    
+    def get_file_by_hash(self, file_hash: str) -> Optional[Dict]:
+        """Get file record by hash"""
+        return self.files.find_one({"hash": file_hash})
+    
+    def remove_first_anime_item(self, anime_list: List[Dict]) -> List[Dict]:
+        """Remove the first item from anime list"""
+        if not anime_list:
+            return []
         
-        self.conn.commit()
+        first_item = anime_list[0]
+        
+        # If there are multiple qualities in the first item, remove the first quality
+        if len(first_item.get("quality", [])) > 1:
+            first_item["magnet"].pop(0)
+            first_item["hash"].pop(0)
+            first_item["quality"].pop(0)
+            first_item["title"].pop(0)
+            return anime_list
+        else:
+            # Remove the entire anime entry
+            return anime_list[1:] if len(anime_list) > 1 else []
     
-    def add_user(self, user_id, username, first_name, last_name):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-        INSERT OR IGNORE INTO users (user_id, username, first_name, last_name)
-        VALUES (?, ?, ?, ?)
-        ''', (user_id, username, first_name, last_name))
-        self.conn.commit()
-    
-    def increment_request(self, user_id):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-        UPDATE users SET total_requests = total_requests + 1
-        WHERE user_id = ?
-        ''', (user_id,))
-        self.conn.commit()
-    
-    def add_to_queue(self, user_id, url):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-        INSERT INTO queue (user_id, url, status)
-        VALUES (?, ?, 'pending')
-        ''', (user_id, url))
-        self.conn.commit()
-        return cursor.lastrowid
-    
-    def get_pending_jobs(self):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-        SELECT id, user_id, url FROM queue
-        WHERE status = 'pending'
-        ORDER BY added_time ASC
-        ''')
-        return cursor.fetchall()
-    
-    def update_job_status(self, job_id, status, file_path=None):
-        cursor = self.conn.cursor()
-        if status == 'processing':
-            cursor.execute('''
-            UPDATE queue SET status = ?, start_time = CURRENT_TIMESTAMP
-            WHERE id = ?
-            ''', (status, job_id))
-        elif status in ['completed', 'failed']:
-            cursor.execute('''
-            UPDATE queue SET status = ?, end_time = CURRENT_TIMESTAMP, file_path = ?
-            WHERE id = ?
-            ''', (status, file_path, job_id))
-        self.conn.commit()
-    
-    def log_action(self, user_id, action, details=""):
-        cursor = self.conn.cursor()
-        cursor.execute('''
-        INSERT INTO logs (user_id, action, details)
-        VALUES (?, ?, ?)
-        ''', (user_id, action, details))
-        self.conn.commit()
-    
-    def close(self):
-        self.conn.close()
+    def test_connection(self) -> bool:
+        """Test database connection"""
+        try:
+            self.client.admin.command('ping')
+            logger.info("Database connection successful")
+            return True
+        except Exception as e:
+            logger.error(f"Database connection failed: {e}")
+            return False
 
-# Global instance
+# Global database instance
 db = Database()
