@@ -1,6 +1,8 @@
-import libtorrent as lt
-import time
+# plugins/torrent_handler_fallback.py
 import logging
+import subprocess
+import os
+import time
 from typing import Optional, Dict
 from pyrogram.types import Message
 
@@ -8,91 +10,91 @@ logger = logging.getLogger(__name__)
 
 class TorrentHandler:
     def __init__(self):
-        self.session = lt.session()
-        self.session.listen_on(6881, 6891)
-        self.session.start_dht()
+        self.download_dir = "./downloads"
+        os.makedirs(self.download_dir, exist_ok=True)
     
     def download(self, magnet_link: str, status_message: Message = None) -> Optional[Dict]:
         """
-        Download a torrent from magnet link
-        
-        Args:
-            magnet_link: Magnet URI
-            status_message: Pyrogram message to update with progress
-            
-        Returns:
-            Dict containing file path and name, or None if failed
+        Download torrent using aria2c (fallback method)
         """
         try:
             logger.info(f"Starting download: {magnet_link[:50]}...")
             
-            # Add torrent to session
-            params = {'save_path': './downloads'}
-            handle = lt.add_magnet_uri(self.session, magnet_link, params)
+            if status_message:
+                status_message.edit_text("📥 Starting download...")
             
-            # Wait for metadata
-            start_time = time.time()
-            while not handle.has_metadata():
-                time.sleep(1)
-                if time.time() - start_time > 60:  # Timeout after 60 seconds
-                    logger.error("Timeout waiting for metadata")
-                    return None
+            # Use aria2c for torrent downloading
+            import random
+            import string
             
-            logger.info(f"Downloading: {handle.name()}")
+            # Generate random filename
+            file_hash = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+            output_file = f"{self.download_dir}/download_{file_hash}"
             
-            # Download loop
-            while handle.status().state != lt.torrent_status.seeding:
-                status = handle.status()
-                state_str = [
-                    'queued', 'checking', 'downloading metadata',
-                    'downloading', 'finished', 'seeding', 'allocating'
-                ]
-                
-                progress_text = (
-                    f"{status.progress * 100:.1f}% complete | "
-                    f"↓ {status.download_rate / 1000:.1f} kB/s | "
-                    f"↑ {status.upload_rate / 1000:.1f} kB/s | "
-                    f"Peers: {status.num_peers} | "
-                    f"{state_str[status.state]}"
-                )
-                
-                logger.info(progress_text)
-                
-                # Update status message if provided
-                if status_message:
-                    try:
-                        status_message.edit_text(progress_text)
-                    except:
-                        pass
-                
-                time.sleep(5)
+            # Build aria2c command
+            command = [
+                "aria2c",
+                "--seed-time=0",  # Don't seed after download
+                "--max-connection-per-server=16",
+                "--split=16",
+                "--min-split-size=1M",
+                "--continue=true",
+                f"--dir={self.download_dir}",
+                f"--out={file_hash}",
+                magnet_link
+            ]
             
-            # Download completed
-            end_time = time.time()
-            elapsed = end_time - start_time
-            logger.info(
-                f"Download completed: {handle.name()} | "
-                f"Time: {int(elapsed // 60)}m {int(elapsed % 60)}s"
+            logger.info(f"Running command: {' '.join(command)}")
+            
+            # Execute download
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
             )
             
-            if status_message:
-                status_message.edit_text("✅ Download completed, now uploading...")
+            # Monitor progress
+            start_time = time.time()
+            last_update = time.time()
             
-            return {
-                "file": f"./downloads/{handle.name()}",
-                "name": handle.name()
-            }
+            for line in process.stdout:
+                if status_message and time.time() - last_update > 5:
+                    try:
+                        status_message.edit_text(f"📥 Downloading...\n{line[:100]}")
+                        last_update = time.time()
+                    except:
+                        pass
+            
+            process.wait()
+            
+            if process.returncode == 0:
+                # Find the downloaded file
+                for file in os.listdir(self.download_dir):
+                    if file.startswith(file_hash):
+                        file_path = os.path.join(self.download_dir, file)
+                        elapsed = time.time() - start_time
+                        logger.info(f"Download completed in {elapsed:.1f}s: {file_path}")
+                        
+                        if status_message:
+                            status_message.edit_text("✅ Download completed, now uploading...")
+                        
+                        return {
+                            "file": file_path,
+                            "name": file
+                        }
+            
+            logger.error("Download failed")
+            if status_message:
+                status_message.edit_text("❌ Download failed")
+            return None
             
         except Exception as e:
-            logger.error(f"Torrent download error: {e}")
+            logger.error(f"Download error: {e}")
             if status_message:
                 status_message.edit_text(f"❌ Download failed: {e}")
             return None
     
     def cleanup(self):
-        """Clean up torrent session"""
-        try:
-            self.session.pause()
-            logger.info("Torrent session cleaned up")
-        except Exception as e:
-            logger.error(f"Error cleaning up torrent session: {e}")
+        """Clean up"""
+        logger.info("Torrent handler cleaned up")
