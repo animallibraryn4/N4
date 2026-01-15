@@ -22,7 +22,7 @@ class Config:
     PRODUCTION_CHAT = -1001925970923
     
     # Database - FROM ENVIRONMENT VARIABLES
-    DATABASE_URL = os.getenv("DATABASE_URL", "")
+    DATABASE_URL = os.getenv("DATABASE_URL", "mongodb+srv://mikota4432:jkJDQuZH6o8pxxZe@cluster0.2vngilq.mongodb.net/?retryWrites=true&w=majority")
     DATABASE_NAME = "AAB"
     
     # File Paths
@@ -68,4 +68,5 @@ class Config:
             raise ValueError(f"Missing required configuration: {', '.join(missing)}")
 
 config = Config()
+
 
