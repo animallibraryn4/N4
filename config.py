@@ -1,37 +1,52 @@
 import os
-from dotenv import load_dotenv
+from typing import List
 
-load_dotenv()
+class Config:
+    # Bot Information
+    AUTHOR = "Yash-Kun"
+    LICENSED_UNDER = "GNU GPL V-3.0"
+    
+    # Telegram Configuration
+    API_ID = 22299340
+    API_HASH = ""  # Add your API hash
+    MAIN_BOT_TOKEN = "7765824"  # Add your bot token
+    CLIENT_BOT_TOKEN = "76736"  # Add your client bot token
+    
+    # Chat IDs
+    OWNER_IDS = ["5380609667"]  # Convert to list of ints if needed
+    MAIN_CHANNEL = -1001896877147
+    FILES_CHANNEL = -1001896877147
+    PRODUCTION_CHAT = -1001925970923
+    
+    # Database
+    DATABASE_URL = "mongodb+srv://mikota4432:jkJDQuZH6o8pxxZe@cluster0.2vngilq.mongodb.net/?retryWrites=true&w=majority"
+    DATABASE_NAME = "AAB"
+    
+    # File Paths
+    DOWNLOADS_DIR = "./downloads"
+    THUMBNAIL_URL = "https://files.catbox.moe/50drro.jpg"
+    LOG_FILE = "logging.txt"
+    
+    # RSS Feed
+    RSS_URL = "http://subsplease.org/rss"
+    
+    # AniList API
+    ANILIST_URL = "https://graphql.anilist.co"
+    
+    # Post Template
+    POST_TEMPLATE = """
+🔸 {}
+➖〰️➖〰️➖〰️➖〰️➖〰️
+🔸 Episode - {}
+〰️➖〰️➖〰️➖〰️➖〰️➖
+🔸 Status - {}
+➖〰️➖〰️➖〰️➖〰️➖〰️
+🔸 Quality - Sub
+〰️➖〰️➖〰️➖〰️➖〰️➖
+"""
+    
+    # Check Intervals (in seconds)
+    ANIME_CHECK_INTERVAL = 300  # 5 minutes
+    WORKER_CHECK_INTERVAL = 300  # 5 minutes
 
-# Bot Configuration
-API_ID = int(os.getenv("API_ID", 22299340))
-API_HASH = os.getenv("API_HASH", "09b09f3e2ff1306da4a19888f614d937")
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-
-# Owner Settings
-OWNER_ID = int(os.getenv("OWNER_ID", 5380609667))
-
-# Queue Settings
-MAX_CONCURRENT = 1  # Maximum concurrent downloads
-QUEUE_ENABLED = True
-
-# Download Settings
-MAX_FILE_SIZE = 2000 * 1024 * 1024  # 2GB
-TIMEOUT = 30  # Request timeout in seconds
-
-# FFmpeg Settings
-FFMPEG_PATH = os.getenv("FFMPEG_PATH", "ffmpeg")
-DEFAULT_QUALITY = "1080p"
-VIDEO_CODEC = "libx264"
-AUDIO_CODEC = "aac"
-
-# Paths
-TEMP_DIR = "temp"
-LOGS_DIR = "logs"
-
-# User-Agent
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-
-# Ensure directories exist
-os.makedirs(TEMP_DIR, exist_ok=True)
-os.makedirs(LOGS_DIR, exist_ok=True)
+config = Config()
