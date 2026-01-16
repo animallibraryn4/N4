@@ -1,14 +1,82 @@
-import asyncio
 import os
 import sys
 import subprocess
 import platform
-import importlib
+import asyncio
+from datetime import datetime
+
+# First, check and install all dependencies
+def install_dependencies():
+    """Install all required Python packages"""
+    required_packages = [
+        "python-telegram-bot==20.7",
+        "httpx==0.27.0",
+        "motor==3.3.2",
+        "pymongo==4.6.1",
+        "pydantic-settings==2.2.1",
+        "aiofiles==23.2.1",
+        "beautifulsoup4==4.12.3",
+        "feedparser==6.0.11",
+        "aiocron==1.8",
+        "loguru==0.7.2",
+        "python-libtorrent==2.0.9"
+    ]
+    
+    print("🔧 Installing required dependencies...")
+    
+    for package in required_packages:
+        try:
+            # Extract package name for import test
+            package_name = package.split('=')[0].replace('-', '_')
+            
+            # Try to import the package
+            __import__(package_name)
+            print(f"✅ {package_name} is already installed")
+            
+        except ImportError:
+            print(f"📦 Installing {package}...")
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+                print(f"✅ Successfully installed {package}")
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Failed to install {package}: {e}")
+                
+                # Try alternative installation for libtorrent
+                if "libtorrent" in package:
+                    print("🔄 Trying alternative libtorrent installation...")
+                    try:
+                        subprocess.check_call([sys.executable, "-m", "pip", "install", "python-libtorrent"])
+                        print("✅ Alternative libtorrent installation successful")
+                    except:
+                        print("⚠️ Warning: libtorrent installation failed. Torrent downloads will not work.")
+
+def check_and_install_ffmpeg():
+    """Check if ffmpeg is installed and provide instructions"""
+    try:
+        subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        print("✅ FFmpeg is installed")
+        return True
+    except (subprocess.SubprocessError, FileNotFoundError):
+        print("⚠️ FFmpeg is not installed")
+        
+        system = platform.system().lower()
+        instructions = {
+            "linux": "sudo apt-get update && sudo apt-get install -y ffmpeg",
+            "darwin": "brew install ffmpeg",
+            "windows": "Download from https://ffmpeg.org/download.html and add to PATH"
+        }
+        
+        print(f"📝 Install FFmpeg using: {instructions.get(system, 'Visit https://ffmpeg.org/download.html')}")
+        return False
+
+# Install dependencies before importing anything else
+install_dependencies()
+check_and_install_ffmpeg()
+
+# Now import the installed packages
 from loguru import logger
 from telegram.ext import Application, ContextTypes
 from telegram import Update
-import aiohttp
-from datetime import datetime
 
 # Import modules
 from config import config
@@ -28,114 +96,6 @@ logger.add(
     format="{time:YYYY-MM-DD HH:mm:ss} | {level: | <8} | {name}:{function}:{line} - {message}"
 )
 
-def check_and_install_libtorrent():
-    """Check if libtorrent is installed and install if missing"""
-    try:
-        import libtorrent
-        logger.info(f"libtorrent is already installed (version: {libtorrent.__version__})")
-        return True
-    except ImportError:
-        logger.warning("libtorrent not found. Attempting to install...")
-        
-        system = platform.system().lower()
-        
-        try:
-            if system == "linux":
-                # Try to install via pip with system dependencies
-                logger.info("Installing libtorrent for Linux...")
-                
-                # Install system dependencies first
-                subprocess.run([
-                    "apt-get", "update"
-                ], capture_output=True)
-                
-                subprocess.run([
-                    "apt-get", "install", "-y", 
-                    "python3-dev", 
-                    "libboost-python-dev", 
-                    "libboost-system-dev"
-                ], capture_output=True)
-                
-                # Install via pip
-                subprocess.check_call([
-                    sys.executable, "-m", "pip", "install", 
-                    "--no-cache-dir", "python-libtorrent==2.0.9"
-                ])
-                
-            elif system == "windows":
-                logger.info("Installing libtorrent for Windows...")
-                subprocess.check_call([
-                    sys.executable, "-m", "pip", "install",
-                    "--no-cache-dir", "python-libtorrent==2.0.9"
-                ])
-                
-            elif system == "darwin":  # macOS
-                logger.info("Installing libtorrent for macOS...")
-                # Install Homebrew dependencies first if available
-                try:
-                    subprocess.run(["brew", "--version"], capture_output=True)
-                    subprocess.run(["brew", "install", "boost-python3"], capture_output=True)
-                except:
-                    pass
-                
-                subprocess.check_call([
-                    sys.executable, "-m", "pip", "install",
-                    "--no-cache-dir", "python-libtorrent==2.0.9"
-                ])
-            
-            logger.info("libtorrent installed successfully!")
-            
-            # Verify installation
-            import libtorrent
-            logger.info(f"libtorrent verification successful (version: {libtorrent.__version__})")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to install libtorrent: {e}")
-            
-            # Try alternative installation method
-            logger.info("Trying alternative installation method...")
-            try:
-                # Install from wheel if available
-                subprocess.check_call([
-                    sys.executable, "-m", "pip", "install",
-                    "python-libtorrent"
-                ])
-                import libtorrent
-                logger.info(f"Alternative installation successful! (version: {libtorrent.__version__})")
-                return True
-            except Exception as e2:
-                logger.error(f"Alternative installation also failed: {e2}")
-                return False
-    
-    except Exception as e:
-        logger.error(f"Error checking libtorrent: {e}")
-        return False
-
-def check_and_install_ffmpeg():
-    """Check if ffmpeg is installed"""
-    try:
-        # Check if ffmpeg is available
-        result = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
-        if result.returncode == 0:
-            logger.info("FFmpeg is already installed")
-            return True
-        else:
-            logger.warning("FFmpeg not found or not working properly")
-            return False
-    except FileNotFoundError:
-        logger.warning("FFmpeg not found. Please install FFmpeg for video encoding.")
-        
-        system = platform.system().lower()
-        installation_guide = {
-            "linux": "sudo apt-get install ffmpeg",
-            "darwin": "brew install ffmpeg",
-            "windows": "Download from https://ffmpeg.org/download.html"
-        }
-        
-        logger.info(f"Install FFmpeg using: {installation_guide.get(system, 'Visit https://ffmpeg.org/download.html')}")
-        return False
-
 class AutoAnimeBot:
     def __init__(self):
         self.db = Database()
@@ -146,15 +106,6 @@ class AutoAnimeBot:
     async def initialize(self):
         """Initialize all components"""
         logger.info("Starting AutoAnimeBot initialization...")
-        
-        # Check and install dependencies
-        if not check_and_install_libtorrent():
-            logger.critical("libtorrent installation failed! Bot cannot function without it.")
-            logger.info("You can manually install it with: pip install python-libtorrent")
-            sys.exit(1)
-        
-        # Check for ffmpeg (optional but recommended)
-        check_and_install_ffmpeg()
         
         # Create downloads directory
         os.makedirs(config.DOWNLOADS_DIR, exist_ok=True)
@@ -168,10 +119,8 @@ class AutoAnimeBot:
         self.main_bot_app = Application.builder().token(config.MAIN_BOT_TOKEN).build()
         self.file_bot_app = Application.builder().token(config.CLIENT_BOT_TOKEN).build()
         
-        # Import anime_handler after libtorrent is confirmed to be installed
+        # Import and initialize anime handler
         from plugins.anime_handler import AnimeHandler
-        
-        # Initialize anime handler
         self.anime_handler = AnimeHandler(self.main_bot_app.bot, self.file_bot_app.bot, self.db)
         
         # Setup commands
@@ -181,21 +130,24 @@ class AutoAnimeBot:
     
     async def start_background_tasks(self):
         """Start periodic background tasks"""
-        from aiocron import crontab
-        
-        # Check for new anime every 5 minutes
-        @crontab('*/5 * * * *')
-        async def check_new_anime():
-            logger.info("Checking for new anime...")
-            await self.anime_handler.check_new_anime()
-        
-        # Process queue every 5 minutes
-        @crontab('*/5 * * * *')
-        async def process_queue():
-            logger.info("Processing anime queue...")
-            await self.anime_handler.process_anime_queue()
-        
-        logger.info("Background tasks scheduled")
+        try:
+            from aiocron import crontab
+            
+            # Check for new anime every 5 minutes
+            @crontab('*/5 * * * *')
+            async def check_new_anime():
+                logger.info("Checking for new anime...")
+                await self.anime_handler.check_new_anime()
+            
+            # Process queue every 5 minutes
+            @crontab('*/5 * * * *')
+            async def process_queue():
+                logger.info("Processing anime queue...")
+                await self.anime_handler.process_anime_queue()
+            
+            logger.info("Background tasks scheduled")
+        except Exception as e:
+            logger.error(f"Failed to start background tasks: {e}")
     
     async def send_startup_message(self):
         """Send startup notification"""
@@ -205,10 +157,7 @@ class AutoAnimeBot:
                 text="🤖 **AutoAnimeBot Started Successfully!**\n"
                      f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
                      f"👤 Author: {config.AUTHOR}\n"
-                     f"📜 License: {config.LICENSED_UNDER}\n\n"
-                     f"✅ libtorrent: Installed\n"
-                     f"✅ Database: Connected\n"
-                     f"✅ Bots: Ready"
+                     f"📜 License: {config.LICENSED_UNDER}"
             )
         except Exception as e:
             logger.error(f"Failed to send startup message: {e}")
@@ -258,4 +207,5 @@ async def main():
     await bot.run()
 
 if __name__ == "__main__":
+    # Run the bot
     asyncio.run(main())
