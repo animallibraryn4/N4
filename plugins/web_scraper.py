@@ -1,79 +1,112 @@
-import requests
-from lxml import etree
-from typing import Optional, Dict, List
+import aiohttp
+import feedparser
+from typing import List, Dict, Optional
 from config import config
-import logging
-
-logger = logging.getLogger(__name__)
+from loguru import logger
+import asyncio
+import hashlib
 
 class WebScraper:
     def __init__(self):
         self.rss_url = config.RSS_URL
+        self.session = None
     
-    def get_latest_anime(self, last_hash: Optional[str] = None, limit: int = 10) -> Optional[Dict]:
+    async def init_session(self):
+        """Initialize aiohttp session"""
+        if not self.session:
+            self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
+    
+    async def close_session(self):
+        """Close aiohttp session"""
+        if self.session:
+            await self.session.close()
+    
+    async def get_latest_anime(self, last_hash: Optional[str] = None, limit: int = 30) -> Optional[Dict]:
         """
-        Get latest anime from RSS feed
+        Get latest anime from RSS feed asynchronously
         
         Args:
-            last_hash: Last processed hash to start from
-            limit: Maximum number of items to fetch
+            last_hash: Last processed hash
+            limit: Maximum items to fetch
             
         Returns:
-            Dictionary with anime array and latest hash
+            Dict with anime array and latest hash
         """
         try:
-            response = requests.get(self.rss_url, timeout=10)
-            if response.status_code != 200:
-                logger.error(f"Failed to fetch RSS: {response.status_code}")
+            await self.init_session()
+            
+            async with self.session.get(self.rss_url) as response:
+                if response.status != 200:
+                    logger.error(f"Failed to fetch RSS: {response.status}")
+                    return None
+                
+                content = await response.text()
+            
+            # Parse RSS feed
+            feed = feedparser.parse(content)
+            
+            if not feed.entries:
+                logger.warning("No entries in RSS feed")
                 return None
             
-            # Parse XML
-            root = etree.fromstring(response.content)
-            items = root.xpath('//item')
-            
-            if not items:
-                logger.warning("No items found in RSS feed")
-                return None
-            
-            # Process items
-            anime_array = []
+            anime_dict = {}
             latest_hash = None
             
-            for i, item in enumerate(items[:limit]):
-                item_hash = item.findtext('guid')
+            for i, entry in enumerate(feed.entries[:limit]):
+                entry_id = entry.get('id', '')
                 
-                # Stop if we reached the last processed hash
-                if last_hash and item_hash == last_hash:
+                # Stop if we reached last processed hash
+                if last_hash and entry_id == last_hash:
                     break
                 
-                # Extract anime information
-                category = item.findtext('category', '').split("-")
-                if len(category) < 2:
-                    continue
+                # Extract info from entry
+                title = entry.get('title', '')
+                magnet = entry.get('link', '')
+                categories = entry.get('tags', [{}])
                 
-                anime_name = category[0].strip()
-                quality = category[-1].strip() if len(category) > 1 else "Unknown"
+                # Parse categories for quality and name
+                anime_name = ""
+                quality = "Unknown"
+                
+                for cat in categories:
+                    cat_term = cat.get('term', '')
+                    if '-' in cat_term:
+                        parts = cat_term.split('-')
+                        anime_name = parts[0].strip()
+                        if len(parts) > 1:
+                            quality = parts[-1].strip()
+                        break
+                
+                if not anime_name:
+                    # Fallback: try to extract from title
+                    if ']' in title and '-' in title:
+                        parts = title.split(']')
+                        if len(parts) > 1:
+                            anime_name = parts[1].split('-')[0].strip()
+                
+                # Create unique hash for this entry
+                entry_hash = hashlib.md5(f"{title}{magnet}".encode()).hexdigest()
+                
+                if i == 0:
+                    latest_hash = entry_id
                 
                 # Group by anime name
-                if anime_array and anime_array[-1]['name'] == anime_name:
-                    # Add to existing anime entry
-                    anime_array[-1]['magnet'].append(item.findtext('link'))
-                    anime_array[-1]['hash'].append(item_hash)
-                    anime_array[-1]['quality'].append(quality)
-                    anime_array[-1]['title'].append(item.findtext('title'))
+                if anime_name in anime_dict:
+                    anime_dict[anime_name]['magnets'].append(magnet)
+                    anime_dict[anime_name]['hashes'].append(entry_hash)
+                    anime_dict[anime_name]['qualities'].append(quality)
+                    anime_dict[anime_name]['titles'].append(title)
                 else:
-                    # Create new anime entry
-                    anime_array.append({
+                    anime_dict[anime_name] = {
                         'name': anime_name,
-                        'magnet': [item.findtext('link')],
-                        'hash': [item_hash],
-                        'quality': [quality],
-                        'title': [item.findtext('title')]
-                    })
-                
-                # Update latest hash
-                if i == 0:
-                    latest_hash = item_hash
+                        'magnets': [magnet],
+                        'hashes': [entry_hash],
+                        'qualities': [quality],
+                        'titles': [title]
+                    }
+            
+            # Convert dict to array
+            anime_array = list(anime_dict.values())
             
             if not anime_array:
                 return None
@@ -87,10 +120,12 @@ class WebScraper:
             logger.error(f"Error fetching anime: {e}")
             return None
     
-    def test_connection(self) -> bool:
+    async def test_connection(self) -> bool:
         """Test RSS feed connection"""
         try:
-            response = requests.get(self.rss_url, timeout=5)
-            return response.status_code == 200
-        except:
+            await self.init_session()
+            async with self.session.get(self.rss_url) as response:
+                return response.status == 200
+        except Exception as e:
+            logger.error(f"RSS connection test failed: {e}")
             return False
