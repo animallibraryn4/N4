@@ -1,13 +1,12 @@
-import os
 import re
 import random
 import string
-import requests
+import aiohttp
 import subprocess
-import logging
+import os
+import asyncio
 from typing import Optional, Dict
-
-logger = logging.getLogger(__name__)
+from loguru import logger
 
 # AniList GraphQL query
 ANIME_QUERY = '''
@@ -21,90 +20,161 @@ query ($search: String) {
         coverImage {
             extraLarge
         }
+        episodes
     }
 }
 '''
 
 def extract_anime_info(title: str) -> Optional[Dict]:
-    """Extract information from anime title"""
-    # Multiple patterns to handle different title formats
-    patterns = [
-        r"\[SubsPlease\] (.+?) - (\d+)(?:v\d+)?(?: \((\d+p)\))? \[.+?\]",
-        r"\[SubsPlease\] (.+?) (\d+)(?: \(\d+p\))? \[.+?\]",
-        r"\[SubsPlease\] (.+?) - (\d+)(?:\.\d+)?(?: \(\d+p\))?",
-    ]
+    """
+    Extract information from anime title
     
-    for pattern in patterns:
-        match = re.match(pattern, title)
-        if match:
-            anime_name = match.group(1).strip()
-            episode = match.group(2)
-            quality = match.group(3) if len(match.groups()) > 2 else "Unknown"
+    Args:
+        title: Anime title string
+        
+    Returns:
+        Dictionary with extracted info or None
+    """
+    try:
+        # Various patterns for SubsPlease releases
+        patterns = [
+            # Pattern 1: [SubsPlease] Show Name - Episode (Quality) [Release Info]
+            r'\[SubsPlease\]\s+(.+?)\s+-\s+(\d+)\s+\((\d+p)\)\s+\[.+?\]',
+            # Pattern 2: [SubsPlease] Show Name Episode (Quality) [Release Info]
+            r'\[SubsPlease\]\s+(.+?)\s+(\d+)\s+\((\d+p)\)\s+\[.+?\]',
+            # Pattern 3: Show Name - Episode (Quality) [SubsPlease]
+            r'(.+?)\s+-\s+(\d+)\s+\((\d+p)\)\s+\[SubsPlease\]',
+            # Pattern 4: Simple pattern for fallback
+            r'\[SubsPlease\]\s+(.+?)\s+-?\s*(\d+)\s*[\(\[]'
+        ]
+        
+        for pattern in patterns:
+            match = re.match(pattern, title, re.IGNORECASE)
+            if match:
+                anime_name = match.group(1).strip()
+                episode = match.group(2)
+                quality = match.group(3) if len(match.groups()) > 2 else "1080p"
+                
+                # Clean anime name
+                if 'Season' in anime_name:
+                    parts = anime_name.split('Season')
+                    base_name = parts[0].strip()
+                    season = parts[1].strip()
+                    display_name = f"{base_name} Season {season}"
+                    search_query = f"{base_name} Season {season}"
+                else:
+                    display_name = anime_name
+                    search_query = anime_name
+                    season = None
+                
+                return {
+                    "display_name": display_name,
+                    "search_query": search_query,
+                    "episode": episode,
+                    "season": season,
+                    "quality": quality,
+                    "original_title": title
+                }
+        
+        logger.warning(f"Could not parse title: {title}")
+        
+        # Fallback: extract any information we can
+        if 'SubsPlease' in title:
+            # Try to extract episode number
+            episode_match = re.search(r'(\d{2,3})', title)
+            episode = episode_match.group(1) if episode_match else "01"
             
-            # Check for season marker
-            season_match = re.search(r"S(\d+)", anime_name)
-            if season_match:
-                season = season_match.group(1)
-                display_name = re.sub(r'S\d+', f'Season {season}', anime_name)
-                search_query = re.sub(r'S\d+', f'Season {season}', anime_name)
-            else:
-                display_name = anime_name
-                search_query = anime_name
+            # Try to extract quality
+            quality_match = re.search(r'(\d{3,4}p)', title, re.IGNORECASE)
+            quality = quality_match.group(1) if quality_match else "1080p"
+            
+            # Extract name (everything before episode number)
+            name_parts = title.split(str(episode))[0]
+            anime_name = name_parts.replace('[SubsPlease]', '').strip(' -')
             
             return {
-                "display_name": display_name,
-                "search_query": search_query,
+                "display_name": anime_name,
+                "search_query": anime_name,
                 "episode": episode,
+                "season": None,
                 "quality": quality,
                 "original_title": title
             }
-    
-    logger.warning(f"Could not parse title: {title}")
-    return None
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error extracting anime info: {e}")
+        return None
 
-def get_anime_details(anime_name: str) -> Dict:
-    """Get anime details from AniList API"""
-    try:
-        # Clean the anime name for better search
-        cleaned_name = re.sub(r'Season \d+', '', anime_name).strip()
-        cleaned_name = re.sub(r'S\d+', '', cleaned_name).strip()
-        
-        variables = {'search': cleaned_name}
-        response = requests.post(
-            'https://graphql.anilist.co',
-            json={'query': ANIME_QUERY, 'variables': variables},
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            media = data.get('data', {}).get('Media', {})
-            
-            title = media.get('title', {})
-            return {
-                "name": title.get('english') or title.get('romaji') or anime_name,
-                "status": media.get('status', 'Unknown'),
-                "image": media.get('coverImage', {}).get('extraLarge')
-            }
-        else:
-            logger.error(f"AniList API error: {response.status_code}")
+async def get_anime_details(anime_name: str) -> Dict:
+    """
+    Get anime details from AniList API asynchronously
     
+    Args:
+        anime_name: Name of anime to search
+        
+    Returns:
+        Dictionary with anime details
+    """
+    try:
+        url = 'https://graphql.anilist.co'
+        variables = {'search': anime_name}
+        
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.post(url, json={'query': ANIME_QUERY, 'variables': variables}) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    media = data.get('data', {}).get('Media', {})
+                    
+                    title_obj = media.get('title', {})
+                    name = title_obj.get('english') or title_obj.get('romaji') or anime_name
+                    
+                    return {
+                        "name": name,
+                        "status": media.get('status', 'Unknown'),
+                        "image": media.get('coverImage', {}).get('extraLarge'),
+                        "episodes": media.get('episodes', 0)
+                    }
+                else:
+                    logger.error(f"AniList API error: {response.status}")
+    
+    except asyncio.TimeoutError:
+        logger.warning(f"Timeout fetching anime details for: {anime_name}")
     except Exception as e:
         logger.error(f"Error fetching anime details: {e}")
     
+    # Return default values on error
     return {
         "name": anime_name,
         "status": "Unknown",
-        "image": None
+        "image": None,
+        "episodes": 0
     }
 
 def generate_random_hash(length: int = 20) -> str:
-    """Generate a random hash string"""
+    """
+    Generate a random hash string
+    
+    Args:
+        length: Length of hash
+        
+    Returns:
+        Random hash string
+    """
     characters = string.ascii_letters + string.digits
-    return ''.join(random.choice(characters) for _ in range(length))
+    return ''.join(random.choices(characters, k=length))
 
-def encode_video_file(input_path: str) -> Optional[str]:
-    """Encode video file to compressed format"""
+async def encode_video_file(input_path: str) -> Optional[str]:
+    """
+    Encode video file to compressed format asynchronously
+    
+    Args:
+        input_path: Path to input video file
+        
+    Returns:
+        Path to encoded file or None if failed
+    """
     try:
         if not os.path.exists(input_path):
             logger.error(f"Input file not found: {input_path}")
@@ -112,42 +182,69 @@ def encode_video_file(input_path: str) -> Optional[str]:
         
         # Extract filename without extension
         base_name = os.path.splitext(os.path.basename(input_path))[0]
-        output_path = f"./downloads/{base_name}_encoded.mp4"
+        output_path = f"{os.path.dirname(input_path)}/{base_name}_encoded.mp4"
         
-        # Clean output path if it already exists
+        # Check if output already exists
         if os.path.exists(output_path):
-            os.remove(output_path)
+            logger.info(f"Encoded file already exists: {output_path}")
+            return output_path
         
-        # Build FFmpeg command
+        # Check if ffmpeg is available
+        try:
+            subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        except (subprocess.SubprocessError, FileNotFoundError):
+            logger.warning("FFmpeg not available. Skipping encoding.")
+            return None
+        
+        # Encode video using ffmpeg
+        logger.info(f"Starting encoding: {input_path}")
+        
+        # Basic encoding command (adjust as needed)
         command = [
-            "ffmpeg",
-            "-i", input_path,
+            "ffmpeg", "-i", input_path,
             "-c:v", "libx264",
-            "-crf", "23",  # Good quality to size ratio
+            "-crf", "23",  # Quality level (lower = better quality, larger file)
             "-preset", "medium",
             "-c:a", "aac",
             "-b:a", "128k",
             "-movflags", "+faststart",
-            "-y",  # Overwrite output file
             output_path
         ]
         
-        logger.info(f"Encoding video: {input_path}")
-        result = subprocess.run(command, capture_output=True, text=True)
+        # Run encoding asynchronously
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
         
-        if result.returncode == 0 and os.path.exists(output_path):
-            logger.info(f"Video encoded successfully: {output_path}")
-            return output_path
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode == 0:
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                logger.info(f"Video encoded successfully: {output_path} ({os.path.getsize(output_path) / (1024*1024):.1f} MB)")
+                return output_path
+            else:
+                logger.error("Encoding produced empty file")
+                return None
         else:
-            logger.error(f"Encoding failed: {result.stderr}")
+            logger.error(f"Encoding failed. Return code: {process.returncode}")
+            logger.error(f"FFmpeg stderr: {stderr.decode()[:500]}")
             return None
     
     except Exception as e:
         logger.error(f"Error encoding video: {e}")
         return None
 
-def progress_callback(current: int, total: int):
-    """Progress callback for uploads/downloads"""
-    if total > 0:
-        percentage = (current / total) * 100
-        logger.debug(f"Progress: {percentage:.1f}%")
+async def check_ffmpeg_available() -> bool:
+    """Check if FFmpeg is available on the system"""
+    try:
+        result = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-version",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await result.communicate()
+        return result.returncode == 0
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return False
