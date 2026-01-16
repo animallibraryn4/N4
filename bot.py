@@ -1,191 +1,261 @@
-# Add missing import at the top
-import os
 import asyncio
-import logging
-import threading
-import time
-from pyrogram import Client, idle
+import os
+import sys
+import subprocess
+import platform
+import importlib
+from loguru import logger
+from telegram.ext import Application, ContextTypes
+from telegram import Update
+import aiohttp
+from datetime import datetime
+
+# Import modules
 from config import config
-from database import db
-from plugins.anime_handler import AnimeHandler
+from database import Database
+from plugins.commands import setup_commands
 
-# Fix the system dependency check
-def check_dependencies():
-    """Check and install required system dependencies"""
-    print("Checking system dependencies...")
-    
-    # Check for mkvtoolnix
-    if os.system("mkvmerge --version") != 0:
-        print("mkvtoolnix not found! Please install it using:")
-        print("sudo apt install mkvtoolnix")
-        print("Or: sudo apt install mkvtoolnix -y")
-        return False
-    
-    # Check for ffmpeg
-    if os.system("ffmpeg -version") != 0:
-        print("ffmpeg not found! Please install it using:")
-        print("sudo apt install ffmpeg -y")
-        return False
-    
-    print("All system dependencies are available.")
-    return True
-
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(config.LOG_FILE)
-    ]
+# Configure logging
+logger.remove()
+logger.add(
+    sys.stdout,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: | <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
 )
-logger = logging.getLogger('AutoAnimeBot')
-
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(config.LOG_FILE)
-    ]
+logger.add(
+    config.LOG_FILE,
+    rotation="10 MB",
+    retention="30 days",
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level: | <8} | {name}:{function}:{line} - {message}"
 )
-logger = logging.getLogger('AutoAnimeBot')
+
+def check_and_install_libtorrent():
+    """Check if libtorrent is installed and install if missing"""
+    try:
+        import libtorrent
+        logger.info(f"libtorrent is already installed (version: {libtorrent.__version__})")
+        return True
+    except ImportError:
+        logger.warning("libtorrent not found. Attempting to install...")
+        
+        system = platform.system().lower()
+        
+        try:
+            if system == "linux":
+                # Try to install via pip with system dependencies
+                logger.info("Installing libtorrent for Linux...")
+                
+                # Install system dependencies first
+                subprocess.run([
+                    "apt-get", "update"
+                ], capture_output=True)
+                
+                subprocess.run([
+                    "apt-get", "install", "-y", 
+                    "python3-dev", 
+                    "libboost-python-dev", 
+                    "libboost-system-dev"
+                ], capture_output=True)
+                
+                # Install via pip
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install", 
+                    "--no-cache-dir", "python-libtorrent==2.0.9"
+                ])
+                
+            elif system == "windows":
+                logger.info("Installing libtorrent for Windows...")
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install",
+                    "--no-cache-dir", "python-libtorrent==2.0.9"
+                ])
+                
+            elif system == "darwin":  # macOS
+                logger.info("Installing libtorrent for macOS...")
+                # Install Homebrew dependencies first if available
+                try:
+                    subprocess.run(["brew", "--version"], capture_output=True)
+                    subprocess.run(["brew", "install", "boost-python3"], capture_output=True)
+                except:
+                    pass
+                
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install",
+                    "--no-cache-dir", "python-libtorrent==2.0.9"
+                ])
+            
+            logger.info("libtorrent installed successfully!")
+            
+            # Verify installation
+            import libtorrent
+            logger.info(f"libtorrent verification successful (version: {libtorrent.__version__})")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to install libtorrent: {e}")
+            
+            # Try alternative installation method
+            logger.info("Trying alternative installation method...")
+            try:
+                # Install from wheel if available
+                subprocess.check_call([
+                    sys.executable, "-m", "pip", "install",
+                    "python-libtorrent"
+                ])
+                import libtorrent
+                logger.info(f"Alternative installation successful! (version: {libtorrent.__version__})")
+                return True
+            except Exception as e2:
+                logger.error(f"Alternative installation also failed: {e2}")
+                return False
+    
+    except Exception as e:
+        logger.error(f"Error checking libtorrent: {e}")
+        return False
+
+def check_and_install_ffmpeg():
+    """Check if ffmpeg is installed"""
+    try:
+        # Check if ffmpeg is available
+        result = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
+        if result.returncode == 0:
+            logger.info("FFmpeg is already installed")
+            return True
+        else:
+            logger.warning("FFmpeg not found or not working properly")
+            return False
+    except FileNotFoundError:
+        logger.warning("FFmpeg not found. Please install FFmpeg for video encoding.")
+        
+        system = platform.system().lower()
+        installation_guide = {
+            "linux": "sudo apt-get install ffmpeg",
+            "darwin": "brew install ffmpeg",
+            "windows": "Download from https://ffmpeg.org/download.html"
+        }
+        
+        logger.info(f"Install FFmpeg using: {installation_guide.get(system, 'Visit https://ffmpeg.org/download.html')}")
+        return False
 
 class AutoAnimeBot:
     def __init__(self):
-        self.bot = None
-        self.file_client = None
-        self.bot_me = None
+        self.db = Database()
         self.anime_handler = None
+        self.main_bot_app = None
+        self.file_bot_app = None
         
-    async def initialize_clients(self):
-        """Initialize Telegram clients"""
-        # File bot client
-        self.file_client = Client(
-            "FileBot",
-            api_id=config.API_ID,
-            api_hash=config.API_HASH,
-            bot_token=config.CLIENT_BOT_TOKEN,
-            plugins={"root": "plugins"}
-        )
+    async def initialize(self):
+        """Initialize all components"""
+        logger.info("Starting AutoAnimeBot initialization...")
         
-        # Main bot client
-        self.bot = Client(
-            "mainbot",
-            api_id=config.API_ID,
-            api_hash=config.API_HASH,
-            bot_token=config.MAIN_BOT_TOKEN,
-            plugins={"root": "plugins"}
-        )
+        # Check and install dependencies
+        if not check_and_install_libtorrent():
+            logger.critical("libtorrent installation failed! Bot cannot function without it.")
+            logger.info("You can manually install it with: pip install python-libtorrent")
+            sys.exit(1)
+        
+        # Check for ffmpeg (optional but recommended)
+        check_and_install_ffmpeg()
+        
+        # Create downloads directory
+        os.makedirs(config.DOWNLOADS_DIR, exist_ok=True)
+        
+        # Initialize database
+        if not await self.db.test_connection():
+            logger.critical("Database connection failed!")
+            sys.exit(1)
+        
+        # Initialize Telegram bots
+        self.main_bot_app = Application.builder().token(config.MAIN_BOT_TOKEN).build()
+        self.file_bot_app = Application.builder().token(config.CLIENT_BOT_TOKEN).build()
+        
+        # Import anime_handler after libtorrent is confirmed to be installed
+        from plugins.anime_handler import AnimeHandler
         
         # Initialize anime handler
-        self.anime_handler = AnimeHandler(self.bot, self.file_client)
+        self.anime_handler = AnimeHandler(self.main_bot_app.bot, self.file_bot_app.bot, self.db)
         
-    def start_background_tasks(self):
-        """Start background tasks for checking and processing anime"""
-        # Check for new anime periodically
-        threading.Thread(
-            target=self._interval_task,
-            args=(self.anime_handler.check_new_anime, config.ANIME_CHECK_INTERVAL),
-            daemon=True
-        ).start()
+        # Setup commands
+        await setup_commands(self.main_bot_app, self.anime_handler)
         
-        # Process anime queue periodically
-        threading.Thread(
-            target=self._interval_task,
-            args=(self.anime_handler.process_anime_queue, config.WORKER_CHECK_INTERVAL),
-            daemon=True
-        ).start()
-        
-        logger.info("Background tasks started")
+        logger.info("Initialization completed successfully!")
     
-    def _interval_task(self, callback, interval):
-        """Run a callback at regular intervals"""
-        while True:
-            try:
-                callback()
-            except Exception as e:
-                logger.error(f"Error in interval task: {e}")
-            time.sleep(interval)
+    async def start_background_tasks(self):
+        """Start periodic background tasks"""
+        from aiocron import crontab
+        
+        # Check for new anime every 5 minutes
+        @crontab('*/5 * * * *')
+        async def check_new_anime():
+            logger.info("Checking for new anime...")
+            await self.anime_handler.check_new_anime()
+        
+        # Process queue every 5 minutes
+        @crontab('*/5 * * * *')
+        async def process_queue():
+            logger.info("Processing anime queue...")
+            await self.anime_handler.process_anime_queue()
+        
+        logger.info("Background tasks scheduled")
     
-    async def start(self):
-        """Start the bot"""
-        logger.info(f"AutoAnimeBot starting...")
-        logger.info(f"Author: {config.AUTHOR}")
-        logger.info(f"License: {config.LICENSED_UNDER}")
-        
-        # Test database connection
-        if not db.test_connection():
-            logger.critical("Database connection failed. Exiting.")
-            return
-        
-        # Initialize clients
-        await self.initialize_clients()
-        
-        # Start clients
-        await self.file_client.start()
-        await self.bot.start()
-        
-        # Get bot info
-        self.bot_me = await self.bot.get_me()
-        logger.info(f"Main bot started: @{self.bot_me.username}")
-        
-        # Set bot_me in anime handler
-        self.anime_handler.bot_me = self.bot_me
-        
-        # Send startup notifications
-        await self.send_startup_notifications()
-        
-        # Start background tasks
-        self.start_background_tasks()
-        
-        # Keep bot running
-        logger.info("Bot is now running...")
-        await idle()
-        
-        # Stop clients
-        await self.stop()
-    
-    async def send_startup_notifications(self):
-        """Send startup notifications to production chat"""
+    async def send_startup_message(self):
+        """Send startup notification"""
         try:
-            await self.bot.send_message(
-                config.PRODUCTION_CHAT,
-                "✅ Main Bot Started Successfully"
-            )
-            await self.file_client.send_message(
-                config.PRODUCTION_CHAT,
-                "✅ File Bot Started Successfully"
+            await self.main_bot_app.bot.send_message(
+                chat_id=config.PRODUCTION_CHAT,
+                text="🤖 **AutoAnimeBot Started Successfully!**\n"
+                     f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                     f"👤 Author: {config.AUTHOR}\n"
+                     f"📜 License: {config.LICENSED_UNDER}\n\n"
+                     f"✅ libtorrent: Installed\n"
+                     f"✅ Database: Connected\n"
+                     f"✅ Bots: Ready"
             )
         except Exception as e:
-            logger.error(f"Failed to send startup notifications: {e}")
+            logger.error(f"Failed to send startup message: {e}")
     
-    async def stop(self):
-        """Stop the bot"""
-        logger.info("Stopping bot...")
-        if self.file_client:
-            await self.file_client.stop()
-        if self.bot:
-            await self.bot.stop()
-        logger.info("Bot stopped")
+    async def run(self):
+        """Main run method"""
+        try:
+            await self.initialize()
+            await self.send_startup_message()
+            await self.start_background_tasks()
+            
+            # Start both bots
+            await self.main_bot_app.initialize()
+            await self.file_bot_app.initialize()
+            
+            logger.info("Bots are running. Press Ctrl+C to stop.")
+            
+            # Keep the bots running
+            await asyncio.gather(
+                self.main_bot_app.run_polling(),
+                self.file_bot_app.run_polling(),
+                return_exceptions=True
+            )
+            
+        except KeyboardInterrupt:
+            logger.info("Shutting down gracefully...")
+        except Exception as e:
+            logger.critical(f"Fatal error: {e}")
+            sys.exit(1)
+        finally:
+            await self.shutdown()
+    
+    async def shutdown(self):
+        """Clean shutdown"""
+        logger.info("Shutting down...")
+        if self.main_bot_app:
+            await self.main_bot_app.stop()
+        if self.file_bot_app:
+            await self.file_bot_app.stop()
+        if self.db:
+            await self.db.close()
+        logger.info("Shutdown complete.")
 
 async def main():
-    """Main function"""
+    """Entry point"""
     bot = AutoAnimeBot()
-    try:
-        await bot.start()
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.critical(f"Fatal error: {e}")
+    await bot.run()
 
 if __name__ == "__main__":
-    # Create downloads directory if it doesn't exist
-    import os
-    os.makedirs(config.DOWNLOADS_DIR, exist_ok=True)
-    
-    # Run the bot
     asyncio.run(main())
-
-
