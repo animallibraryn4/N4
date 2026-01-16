@@ -9,9 +9,9 @@ class Config(BaseSettings):
     
     # Telegram Configuration
     API_ID: int = 22299340
-    API_HASH: str = ""
-    MAIN_BOT_TOKEN: str = ""
-    CLIENT_BOT_TOKEN: str = ""
+    API_HASH: str = "09b09f3e2ff1306da4a19888f614d937"
+    MAIN_BOT_TOKEN: str = "7765824536:AAFxnM5qftx3LWjLjxKsnXeuLf3XMXo950o"
+    CLIENT_BOT_TOKEN: str = "7906213903:AAEvUmwjmwTHC9NtayJ2NLbYsROQdaOeZR0"
     
     # Chat IDs
     OWNER_IDS: List[int] = [5380609667]
@@ -51,3 +51,4 @@ class Config(BaseSettings):
         env_file_encoding = "utf-8"
 
 config = Config()
+
