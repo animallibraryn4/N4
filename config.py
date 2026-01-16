@@ -9,8 +9,8 @@ class Config:
     # Telegram Configuration (Update these in .env or here)
     API_ID = int(os.getenv("API_ID", "22299340"))
     API_HASH = os.getenv("API_HASH", "")
-    MAIN_BOT_TOKEN = os.getenv("MAIN_BOT_TOKEN", "")
-    CLIENT_BOT_TOKEN = os.getenv("CLIENT_BOT_TOKEN", "")
+    MAIN_BOT_TOKEN = os.getenv("MAIN_BOT_TOKEN", "7765824536:AAFxnM5qftx3LWjLjxKsnXeuLf3XMXo950o")
+    CLIENT_BOT_TOKEN = os.getenv("CLIENT_BOT_TOKEN", "7906213903:AAEvUmwjmwTHC9NtayJ2NLbYsROQdaOeZR0")
     
     # Chat IDs
     OWNER_IDS = [int(x) for x in os.getenv("OWNER_IDS", "5380609667").split(",")]
@@ -46,3 +46,4 @@ class Config:
 """
 
 config = Config()
+
